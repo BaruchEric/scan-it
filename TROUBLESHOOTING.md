@@ -39,22 +39,28 @@ Checked in this order:
 
 ## Fujitsu leftovers on this machine
 
-Found at install time (2026-06-11) and left in place (they don't block scanning unless
-they launch something that grabs the scanner):
+Two PFU LaunchAgents were found at install time (2026-06-11) and **persistently disabled**
+on the same day (`launchctl bootout` + `launchctl disable`, survives reboot):
 
-- `/Library/LaunchAgents/com.fujitsu.pfu.ScanSnap.AOUMonitor.plist` — relaunches the
-  ScanSnap Online Update monitor at login. Harmless to scanning, but to silence it:
-  ```sh
-  sudo launchctl bootout system /Library/LaunchAgents/com.fujitsu.pfu.ScanSnap.AOUMonitor.plist 2>/dev/null
-  launchctl bootout gui/$(id -u) /Library/LaunchAgents/com.fujitsu.pfu.ScanSnap.AOUMonitor.plist 2>/dev/null
-  ```
-- `/Library/LaunchAgents/com.ricoh.pfu.SshAutoLaunch.plist` — auto-launches ScanSnap Home
-  when the scanner connects. **This one can grab the device.** If `scan-diag` shows
-  ScanSnap processes reappearing after you killed them, unload it:
-  ```sh
-  launchctl bootout gui/$(id -u) /Library/LaunchAgents/com.ricoh.pfu.SshAutoLaunch.plist
-  ```
-  (Re-enable later with `launchctl bootstrap gui/$(id -u) <plist>` if ever wanted.)
+- `/Library/LaunchAgents/com.fujitsu.pfu.ScanSnap.AOUMonitor.plist` — label
+  `com.fujitsu.pfu.ScanSnap.AOUMonitor` — relaunched the ScanSnap Online Update monitor
+  at login. Harmless to scanning, just noise.
+- `/Library/LaunchAgents/com.ricoh.pfu.SshAutoLaunch.plist` — label (quirkily)
+  `com.ricoh.pfu.SshAutoLaunch.plist` — auto-launched ScanSnap Home when the scanner
+  connects. **This one could grab the device away from SANE.**
+
+If `scan-diag` ever shows ScanSnap processes again, verify the disables are still in place:
+
+```sh
+launchctl print-disabled gui/$(id -u) | grep -i pfu     # both should say => disabled
+```
+
+To re-enable either one (e.g. before uninstalling ScanSnap software properly):
+
+```sh
+launchctl enable gui/$(id -u)/<label>
+launchctl bootstrap gui/$(id -u) /Library/LaunchAgents/<file>.plist
+```
 
 ## Duplex / batch scanning quirks
 
