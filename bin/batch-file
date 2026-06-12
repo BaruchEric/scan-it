@@ -1,0 +1,221 @@
+#!/usr/bin/env bash
+# batch-file — deterministic filing step for a scan-batch staging dir.
+#
+# Reads <staging>/manifest.json (written by Claude during the batch workflow),
+# validates it completely, then rotates, merges, renames, and files every
+# document; writes JSON sidecars and appends the global index. Paycheck
+# documents route through checks-split + checks-normalize unchanged.
+#
+# Part of the ix500-scan project (~/Arik/dev/office/scan-it).
+set -euo pipefail
+
+default_outdir="$HOME/Documents/Scans"
+
+usage() {
+  cat <<EOF
+Usage: batch-file [options] <staging-dir>
+
+Reads <staging-dir>/manifest.json and files every document. Writes NOTHING
+unless the whole manifest validates (every scanned page accounted for exactly
+once across documents, dropped, and review).
+
+Options:
+  -o, --outdir DIR    filing root (default: $default_outdir)
+  --no-text-layer     skip the ocrmypdf searchable text layer
+  --keep-staging      keep the staging dir even on full success
+  -h, --help          show this help
+
+Exit codes:
+  0 success   1 validation failure (nothing written)   2 assembly failure
+EOF
+}
+
+outdir="$default_outdir"
+text_layer=1
+keep_staging=0
+staging=""
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -o|--outdir)
+      [[ $# -ge 2 ]] || { echo "batch-file: $1 requires a value" >&2; exit 64; }
+      outdir="$2"; shift ;;
+    --no-text-layer) text_layer=0 ;;
+    --keep-staging) keep_staging=1 ;;
+    -h|--help) usage; exit 0 ;;
+    -*) echo "batch-file: unknown option: $1" >&2; usage >&2; exit 64 ;;
+    *)
+      [[ -z "$staging" ]] || { echo "batch-file: too many arguments" >&2; exit 64; }
+      staging="$1" ;;
+  esac
+  shift
+done
+
+[[ -n "$staging" ]] || { usage >&2; exit 64; }
+staging="${staging%/}"
+[[ -d "$staging/pages" ]] || { echo "batch-file: not a batch staging dir: $staging" >&2; exit 66; }
+manifest="$staging/manifest.json"
+[[ -f "$manifest" ]] || { echo "batch-file: no manifest.json in $staging" >&2; exit 66; }
+
+for tool in jq img2pdf jpegtran qpdf; do
+  command -v "$tool" >/dev/null 2>&1 || { echo "batch-file: '$tool' not found" >&2; exit 1; }
+done
+
+fail() { echo "batch-file: $*" >&2; exit 1; }
+
+jq -e . "$manifest" >/dev/null 2>&1 || fail "manifest.json is not valid JSON"
+
+# ---------- validation: nothing is written past this section on failure ----------
+
+jq -e '.batch | type == "string"' "$manifest" >/dev/null || fail "missing batch id"
+jq -e '.documents | type == "array"' "$manifest" >/dev/null || fail "missing documents array"
+jq -e '(.documents | length) + ((.review // []) | length) > 0' "$manifest" >/dev/null \
+  || fail "manifest has no documents and no review items"
+jq -e '.documents | all(.pages | type == "array" and length > 0)' "$manifest" >/dev/null \
+  || fail "document with no pages"
+
+# Rule 1: every staging page appears exactly once across documents/dropped/review.
+referenced=$(jq -r '
+  ([.documents[].pages[].file]
+   + [(.dropped // [])[].file]
+   + [(.review // [])[].pages[].file])[]' "$manifest" | sort)
+actual=$(cd "$staging" && find pages -name 'page-*.jpg' | sort)
+if [[ "$referenced" != "$actual" ]]; then
+  echo "batch-file: page accounting mismatch — every scanned page must appear" >&2
+  echo "  exactly once across documents/dropped/review:" >&2
+  diff <(echo "$referenced") <(echo "$actual") | sed 's/^/  /' >&2 || true
+  exit 1
+fi
+
+# Rule 2: rotations.
+jq -e '([.documents[].pages[].rotate] + [(.review // [])[].pages[].rotate])
+       | all(. == 0 or . == 90 or . == 180 or . == 270)' "$manifest" >/dev/null \
+  || fail "bad rotate value (must be 0, 90, 180, or 270)"
+
+# Rule 3: known types; safe slug names on every non-paycheck document.
+jq -e '.documents
+       | all(.type | IN("receipt","invoice","paycheck","contract","statement","letter","misc"))' \
+  "$manifest" >/dev/null || fail "unknown document type"
+jq -e '[.documents[] | select(.type != "paycheck")]
+       | all(.name | type == "string" and test("^[a-z0-9][a-z0-9.-]*$"))' \
+  "$manifest" >/dev/null || fail "bad or missing document name (lowercase slug required)"
+
+# Rules 4+5: paychecks carry check_number + YYYYMMDD paydate, exactly front+back.
+jq -e '[.documents[] | select(.type == "paycheck")]
+       | all((.fields.check_number | tostring | test("^[0-9]+$"))
+             and (.fields.paydate | tostring | test("^[0-9]{8}$"))
+             and (.pages | length == 2))' "$manifest" >/dev/null \
+  || fail "paycheck documents need numeric check_number, YYYYMMDD paydate, and exactly 2 pages"
+
+# ---------- assembly ----------
+
+batch_id=$(jq -r '.batch' "$manifest")
+resolution=$(jq -r '.resolution // 300' "$staging/batch.json" 2>/dev/null || echo 300)
+scanned_at=$(jq -r '.started // ""' "$staging/batch.json" 2>/dev/null || echo "")
+
+workdir=$(mktemp -d -t batch-file)
+trap 'rm -rf "$workdir"' EXIT
+
+pp=0   # unique temp-name counter for prepared pages
+
+prep_page() { # <src> <rotate> -> echoes path of an upright JPEG
+  local src="$1" rot="$2" dest
+  pp=$((pp + 1))
+  dest="$workdir/p-$pp.jpg"
+  if [[ "$rot" == "0" ]]; then
+    cp "$src" "$dest"
+  else
+    # -trim drops edge blocks that are not MCU-aligned, keeping it lossless.
+    jpegtran -rotate "$rot" -trim -copy none -outfile "$dest" "$src"
+  fi
+  echo "$dest"
+}
+
+build_pdf() { # <doc-json> <out.pdf> — assembles .pages[] in order
+  local doc="$1" out="$2" imgs=() file rot
+  while read -r file rot; do
+    imgs+=("$(prep_page "$staging/$file" "$rot")")
+  done < <(jq -r '.pages[] | "\(.file) \(.rotate)"' <<<"$doc")
+  img2pdf --imgsize "${resolution}dpix${resolution}dpi" --output "$out" "${imgs[@]}"
+}
+
+folder_for() {
+  case "$1" in
+    receipt) echo receipts ;;
+    invoice) echo invoices ;;
+    contract) echo contracts ;;
+    statement) echo statements ;;
+    letter) echo letters ;;
+    misc) echo misc ;;
+  esac
+}
+
+unique_target() { # <dir> <base> -> echoes a .pdf path that does not exist yet
+  local dir="$1" base="$2" n=2 t
+  t="$dir/$base.pdf"
+  while [[ -e "$t" ]]; do t="$dir/$base-$n.pdf"; n=$((n + 1)); done
+  echo "$t"
+}
+
+now() { date +%Y-%m-%dT%H:%M:%S%z; }
+
+filed_count=0
+
+file_document() { # <doc-json>
+  local doc="$1" type folder name pdf rel
+  type=$(jq -r '.type' <<<"$doc")
+  folder=$(folder_for "$type")
+  name=$(jq -r '.name' <<<"$doc")
+  mkdir -p "$outdir/$folder"
+  pdf=$(unique_target "$outdir/$folder" "$name")
+  if ! build_pdf "$doc" "$pdf"; then
+    echo "batch-file: assembly failed for $name" >&2
+    return 1
+  fi
+  jq -n --argjson doc "$doc" --arg batch "$batch_id" --arg scanned "$scanned_at" \
+    '{type: $doc.type, name: $doc.name, fields: ($doc.fields // {}),
+      text: ($doc.text // []), confidence: ($doc.confidence // "high"),
+      source: {batch: $batch, pages: [$doc.pages[].file], scanned: $scanned}}' \
+    > "${pdf%.pdf}.json"
+  rel="$folder/$(basename "$pdf")"
+  jq -nc --arg file "$rel" --argjson doc "$doc" --arg batch "$batch_id" --arg filed "$(now)" \
+    '{file: $file, type: $doc.type, fields: ($doc.fields // {}),
+      batch: $batch, filed: $filed}' >> "$outdir/index.jsonl"
+  filed_count=$((filed_count + 1))
+  echo "  $rel"
+}
+
+mkdir -p "$outdir"
+echo "Filing $batch_id into $outdir:"
+while IFS= read -r doc; do
+  file_document "$doc" || exit 2
+done < <(jq -c '.documents[] | select(.type != "paycheck")' "$manifest")
+
+# ---------- review items ----------
+
+nrev=$(jq '(.review // []) | length' "$manifest")
+for (( i = 0; i < nrev; i++ )); do
+  item=$(jq -c ".review[$i]" "$manifest")
+  mkdir -p "$outdir/review"
+  base=$(printf 'review-%s-%02d' "$batch_id" "$((i + 1))")
+  pdf=$(unique_target "$outdir/review" "$base")
+  if ! build_pdf "$item" "$pdf"; then
+    echo "batch-file: assembly failed for $(basename "$pdf")" >&2
+    exit 2
+  fi
+  jq -n --argjson item "$item" --arg batch "$batch_id" \
+    '{reason: ($item.reason // "unspecified"), guess: ($item.guess // {}),
+      source: {batch: $batch, pages: [$item.pages[].file]}}' \
+    > "${pdf%.pdf}.json"
+  echo "  review/$(basename "$pdf")  ($(jq -r '.reason // "unspecified"' <<<"$item"))"
+done
+
+# ---------- cleanup + summary ----------
+
+echo "Filed $filed_count document(s), $nrev held for review."
+if (( keep_staging == 0 && nrev == 0 )); then
+  rm -rf "$staging"
+  echo "Staging removed."
+else
+  echo "Staging kept: $staging"
+fi
