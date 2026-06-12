@@ -76,8 +76,8 @@ batch-file <staging-dir>      # validates manifest, rotates/merges/renames,
 **Output layout under `~/Documents/Scans/`:**
 
 ```
-receipts/       receipt-2026-06-08-home-depot-45.23.pdf   + .json sidecar
-invoices/       invoice-2026-06-01-acme-corp-1200.00.pdf  + .json sidecar
+receipts/       receipt-2026-06-08-home-depot$45.23.pdf   + .json sidecar
+invoices/       invoice-2026-06-01-acme-corp$1200.00.pdf  + .json sidecar
 contracts/      contract-2026-05-15-lease-renewal.pdf     + .json sidecar
 statements/     statement-2026-06-01-chase-checking.pdf   + .json sidecar
 letters/        letter-2026-06-10-irs-notice.pdf          + .json sidecar

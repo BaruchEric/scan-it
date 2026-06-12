@@ -137,7 +137,7 @@ checks-split manifest.
   "documents": [
     {
       "type": "receipt",
-      "name": "receipt-2026-06-08-home-depot-45.23",
+      "name": "receipt-2026-06-08-home-depot$45.23",
       "pages": [ { "file": "pages/page-001.jpg", "rotate": 0 } ],
       "fields": { "vendor": "Home Depot", "date": "2026-06-08", "total": 45.23 },
       "text": [ "full OCR text of page 1" ],
@@ -163,7 +163,7 @@ checks-split manifest.
 1. Every `page-*.jpg` in the staging dir appears **exactly once** across
    `documents[].pages`, `dropped[]`, and `review[]` — no missing, no duplicate pages.
 2. `rotate` ∈ {0, 90, 180, 270}.
-3. `type` ∈ the known set; `name` matches `^[a-z0-9][a-z0-9.-]*$` (no path separators).
+3. `type` ∈ the known set; `name` matches `^[a-z0-9][a-z0-9.$-]*$` (no path separators).
 4. Paycheck documents must carry `check_number` and `paydate` (checks-split needs them).
 5. Within a paycheck document, pages are exactly one front + one back.
 
@@ -204,9 +204,10 @@ qpdf, optional ocrmypdf):
 
 ## Naming convention
 
-`<type>-<YYYY-MM-DD>-<slug>[-<amount>]` — lowercase, hyphen-separated, e.g.
-`receipt-2026-06-08-home-depot-45.23.pdf`,
-`invoice-2026-05-31-coned-1042.50.pdf`,
+`<type>-<YYYY-MM-DD>-<slug>[$<amount>]` — lowercase, hyphen-separated, with the
+amount (when present) joined by a literal `$`, e.g.
+`receipt-2026-06-08-home-depot$45.23.pdf`,
+`invoice-2026-05-31-coned$1042.50.pdf`,
 `contract-2026-04-12-acme-lease.pdf`.
 Paychecks keep the existing `checksYYYYMMDD.pdf` convention.
 
