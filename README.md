@@ -22,8 +22,8 @@ Eight CLI tools live in `bin/` (symlinked into `~/bin`, on PATH):
 | `checks-normalize` | Make every page of a check PDF uniform: render at 300 dpi, trim scanner background, deskew, rotate portrait backs to landscape (bank-image convention), rebuild in place. Idempotent — safe to re-run. |
 | `checks-report` | Per-paydate summary from a data file (`<check_number> <paydate> <amount> <signed>`): check counts, number sequences, missing numbers, period totals, unsigned checks, grand total. |
 | `scan-diag` | Diagnostics for the iX500 + SANE stack — colored pass/fail summary with a fix hint per failure. Changes nothing; safe any time. |
-| `scan-batch` | Scan a heterogeneous stack in chunks (paper sensor auto-resumes between chunks; press Enter or wait 60 s idle to end the batch). Exit codes: 0 success · 1 no scanner · 2 empty ADF · 3 assembly failure. |
-| `batch-file` | Validate, classify, rotate, merge, rename, and file the staged pages produced by `scan-batch`. Reads the manifest Claude writes to `<staging>/manifest.json`; refuses to write unless every scanned page is accounted for exactly once. Exit codes: 0 success · 1 missing/invalid manifest · 2 page-accounting mismatch · 3 write failure. |
+| `scan-batch` | Scan a heterogeneous stack in chunks (paper sensor auto-resumes between chunks; press Enter or wait 60 s idle to end the batch). Exit codes: 0 success · 1 no scanner / device lost / jam · 2 no pages scanned · 64 usage · 66 bad `--resume` dir · 130 interrupted. |
+| `batch-file` | Validate, classify, rotate, merge, rename, and file the staged pages produced by `scan-batch`. Reads the manifest Claude writes to `<staging>/manifest.json`; refuses to write unless every scanned page is accounted for exactly once. Exit codes: 0 success · 1 validation failure (nothing written) · 2 assembly failure · 64 usage · 66 not a staging dir. |
 
 ## Paycheck workflow
 
@@ -57,7 +57,7 @@ scan-batch                    # feed paper in chunks; the iX500 paper sensor
                               # wait 60 s idle to end the batch
 ```
 
-`scan-batch` deposits page images into a timestamped staging directory (e.g. `~/Documents/Scans/.staging/batch-20260611-143022/`).
+`scan-batch` deposits page images into a timestamped staging directory (e.g. `~/Documents/Scans/.batches/batch-20260611-143022/`).
 
 **Step 2 — Classify (Claude reads and sorts):**
 
