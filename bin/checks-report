@@ -1,0 +1,90 @@
+#!/usr/bin/env bash
+# checks-report — per-paydate summary of scanned paychecks.
+#
+# Input: a data file with one line per check (whitespace-separated):
+#
+#     <check_number> <paydate> <amount> <signed>
+#
+#   paydate  YYYYMMDD or YYYY-MM-DD
+#   amount   dollars, e.g. 817.37 (no $ or commas)
+#   signed   y/n — endorsement signature present on the back
+#
+# Output: one line per paydate — check count, number sequence, missing
+# numbers within the sequence, period total, unsigned check numbers —
+# plus a grand-total line.
+#
+# Part of the ix500-scan project (~/Arik/dev/office/scan-it).
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage: checks-report [-o FILE] <datafile>
+
+  -o FILE   also write the report to FILE
+EOF
+}
+
+outfile=""
+data=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -o) [[ $# -ge 2 ]] || { echo "checks-report: -o requires a value" >&2; exit 64; }
+        outfile="$2"; shift ;;
+    -h|--help) usage; exit 0 ;;
+    -*) echo "checks-report: unknown option: $1" >&2; usage >&2; exit 64 ;;
+    *) data="$1" ;;
+  esac
+  shift
+done
+[[ -n "$data" && -f "$data" ]] || { usage >&2; exit 64; }
+
+report=$(awk '
+function comma(n,  s, ip, fp, out, parts) {
+  s = sprintf("%.2f", n); split(s, parts, "."); ip = parts[1]; fp = parts[2]
+  out = ""
+  while (length(ip) > 3) { out = "," substr(ip, length(ip) - 2) out; ip = substr(ip, 1, length(ip) - 3) }
+  return ip out "." fp
+}
+function fmtdate(d) { return substr(d,1,4) "-" substr(d,5,2) "-" substr(d,7,2) }
+/^[[:space:]]*(#|$)/ { next }
+{
+  num = $1 + 0; date = $2; gsub("-", "", date); amt = $3 + 0; signed = tolower($4)
+  if (date !~ /^[0-9]{8}$/ || $1 !~ /^[0-9]+$/ || $3 !~ /^[0-9]+(\.[0-9]+)?$/ || signed !~ /^[yn]$/) {
+    printf "checks-report: bad line %d: %s\n", NR, $0 > "/dev/stderr"; bad = 1; exit 65
+  }
+  cnt[date]++; sum[date] += amt; total += amt; n++
+  list[date] = list[date] " " num
+  if (signed == "n") { uns[date] = uns[date] (uns[date] ? "," : "") num; unstot++ }
+}
+END {
+  if (bad) exit 65
+  m = 0
+  for (d in cnt) dates[++m] = d
+  for (i = 1; i < m; i++) for (j = i + 1; j <= m; j++)
+    if (dates[j] < dates[i]) { t = dates[i]; dates[i] = dates[j]; dates[j] = t }
+  printf "%-12s %6s  %-13s %-18s %14s  %s\n", "Paydate", "Checks", "Sequence", "Missing", "Total", "Unsigned"
+  for (i = 1; i <= m; i++) {
+    d = dates[i]
+    k = split(substr(list[d], 2), v, " ")
+    for (a = 1; a < k; a++) for (b = a + 1; b <= k; b++)
+      if (v[b] + 0 < v[a] + 0) { t = v[a]; v[a] = v[b]; v[b] = t }
+    seq = (k == 1) ? v[1] : v[1] "-" v[k]
+    miss = ""
+    for (a = 1; a < k; a++) {
+      lo = v[a] + 1; hi = v[a + 1] - 1
+      if (hi >= lo) miss = miss (miss ? "," : "") ((lo == hi) ? lo : lo "-" hi)
+    }
+    if (miss == "") miss = "-"
+    u = uns[d]; if (u == "") u = "-"
+    printf "%-12s %6d  %-13s %-18s %14s  %s\n", fmtdate(d), cnt[d], seq, miss, "$" comma(sum[d]), u
+  }
+  printf "%-12s %6d  %-13s %-18s %14s  %s\n", "TOTAL", n, "", "", "$" comma(total), \
+    (unstot ? unstot " unsigned" : "-")
+}
+' "$data")
+
+echo "$report"
+if [[ -n "$outfile" ]]; then
+  echo "$report" > "$outfile"
+  echo "(saved to $outfile)" >&2
+fi

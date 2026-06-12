@@ -1,65 +1,39 @@
-# ix500-scan — ScanSnap iX500 open-source scanning stack for macOS
+# scan-it
 
-Fujitsu/PFU killed ScanSnap Manager support for the iX500 on modern macOS. This project
-restores a clean scan-to-PDF workflow using only open-source software, over **USB**.
+Open-source ScanSnap iX500 document-scanning stack for macOS — SANE-based CLI tools (scan2pdf, scan-checks, checks-split, checks-normalize, checks-report, scan-diag) that turn ADF stacks into dated, ordered PDFs over USB.
 
-Stack: [sane-backends](https://sane-project.org) (`fujitsu` backend) + `img2pdf` for the
-CLI, [NAPS2](https://naps2.com) for the GUI.
+## TL;DR
 
-## Quick start (CLI)
+- **What:** Restores a clean scan-to-PDF workflow for the Fujitsu ScanSnap iX500 on modern macOS, where Fujitsu/PFU killed ScanSnap Manager support — using only open-source software, over USB.
+- **How:** SANE (`scanimage`) drives the scanner; bash tools in `bin/` handle acquisition, PDF assembly (qpdf), and post-processing. NAPS2 covers the GUI path.
+- **Stack:** bash · SANE/sane-backends · qpdf · NAPS2 (GUI). No deploy target — local tooling, symlinked into `~/bin`.
+- **Run it:** drop a stack in the ADF (lid open powers the scanner on), then `scan2pdf taxes` → `~/Documents/Scans/taxes-YYYYMMDD-HHMMSS.pdf` (duplex, color, 300 dpi).
+- **Diagnose:** `scan-diag` runs every check the stack depends on and prints pass/fail with fix hints.
 
-Drop a stack in the ADF (lid open — that powers the scanner on), then:
+## Overview
 
-```sh
-scan2pdf taxes        # → ~/Documents/Scans/taxes-YYYYMMDD-HHMMSS.pdf (duplex, color, 300dpi)
-scan2pdf              # → ~/Documents/Scans/scan-YYYYMMDD-HHMMSS.pdf
-```
+Six CLI tools live in `bin/` (symlinked into `~/bin`, on PATH):
 
-Options:
+| Tool | What it does |
+|------|--------------|
+| `scan2pdf` | Scan an ADF stack to a dated multi-page PDF. Duplex/color/300 dpi by default; `-s` simplex, `-g` gray, `-r N` dpi, `-o DIR` outdir, `-p` lossless PNG intermediates, `-k` keep page images, `-x ARG` pass-through to `scanimage`, `--open` opens the PDF. Exit codes: 0 success · 1 no scanner · 2 empty ADF · 3 PDF assembly failure. |
+| `scan-checks` | Scan employee paychecks duplex (front + endorsement back) into one PDF per paydate (`checksYYYYMMDD.pdf`), pages in check-number order. Wraps `scan2pdf`; re-running a paydate appends, `--replace` starts over, `--staging` scans an unsorted stack for the manifest workflow. |
+| `checks-split` | Deterministic qpdf assembly: split a duplex staging PDF into per-paydate PDFs from a manifest (front/back page, check number, date, rotations), sorted by check number, validated before writing, appends to existing paydate PDFs. |
+| `checks-normalize` | Make every page of a check PDF uniform: render at 300 dpi, trim scanner background, deskew, rotate portrait backs to landscape (bank-image convention), rebuild in place. Idempotent — safe to re-run. |
+| `checks-report` | Per-paydate summary from a data file (`<check_number> <paydate> <amount> <signed>`): check counts, number sequences, missing numbers, period totals, unsigned checks, grand total. |
+| `scan-diag` | Diagnostics for the iX500 + SANE stack — colored pass/fail summary with a fix hint per failure. Changes nothing; safe any time. |
 
-```
-  -s, --simplex        front side only (default: duplex)
-  -g, --gray           grayscale (default: color)
-  -r, --resolution N   dpi (default: 300)
-  -o, --outdir DIR     output directory (default: ~/Documents/Scans)
-  -p, --png            lossless PNG intermediates — PDFs ~20x bigger (default: JPEG)
-  -k, --keep-pages     keep intermediate page images next to the PDF
-  -x, --scanopt ARG    pass an extra option through to scanimage (repeatable)
-      --open           open the finished PDF in Preview
-```
-
-Exit codes: `0` success · `1` no scanner · `2` empty ADF / no pages · `3` PDF assembly failure.
-
-All tools live in `bin/` here and are symlinked into `~/bin` (on PATH).
-
-## Paychecks: scan-checks + checks-split
-
-One PDF per paydate, duplex (front + endorsement back), checks in check-number
-order, named `checksYYYYMMDD.pdf` (the date printed on the checks). Each check
-becomes two consecutive PDF pages (front, then back).
+## Paycheck workflow
 
 **Mixed paydates / unsorted stack** (the usual case — Claude drives this):
 
 ```sh
-scan-checks --staging                 # any order, orientation, or side — all fine
-# ...Claude reads each scanned pair (front vs back, check number, date,
-#    rotation) and writes a manifest, one line per check:
-#    <front_page> <back_page> <check_number> <YYYYMMDD> <front_rot> <back_rot>
+scan-checks --staging                 # any order, orientation, or side
+# Claude reads each scanned pair and writes a manifest, one line per check:
+#   <front_page> <back_page> <check_number> <YYYYMMDD> <front_rot> <back_rot>
 checks-split <staging.pdf> <manifest> # → checksYYYYMMDD.pdf per paydate
 checks-normalize checksYYYYMMDD.pdf   # crop + deskew + uniform landscape pages
 ```
-
-`checks-split` is deterministic qpdf assembly: groups by paydate, sorts by check
-number, swaps pairs scanned back-side-first, applies per-page rotation
-(0/90/180/270) so every check renders uniformly (front upright, then back),
-validates the manifest before writing anything, and appends when a paydate PDF
-already exists. A 3-field short form `<front_page> <check_number> <YYYYMMDD>`
-covers clean stacks (back = front+1, no rotation).
-
-`checks-normalize` then makes every page uniform: renders at 300 dpi, trims the
-scanner background, deskews, and rotates portrait backs to landscape (bank-image
-convention — endorsement strip along the left edge), rebuilding the PDF in
-place. Safe to re-run; run it again after appending more checks to a paydate.
 
 **Single known paydate, pre-sorted stack:**
 
@@ -67,62 +41,30 @@ place. Safe to re-run; run it again after appending more checks to a paydate.
 scan-checks 2026-06-05   # → checks20260605.pdf directly
 ```
 
-Here the sort is physical: stack the checks **face up, lowest check number on
-top**, then flip the whole stack face-down into the feeder, top edge first (the
-iX500 feeds from the bottom). Re-running the same paydate **appends** (for
-stacks over the ~50-sheet ADF limit, or a straggler check); `--replace` starts
-the paydate over.
-
-Scans use `--ald` (auto length detection — pages trimmed to actual check height)
-and `--swdeskew`. A duplex scan always yields an even page count; an odd count
-triggers a multifeed warning (two checks stuck together).
+The sort is physical: stack checks face up, lowest check number on top, then flip the whole stack face-down into the feeder, top edge first (the iX500 feeds from the bottom). Scans use `--ald` (auto length detection) and `--swdeskew`; an odd page count from a duplex scan triggers a multifeed warning.
 
 ## GUI: NAPS2
 
-NAPS2 is installed at `/Applications/NAPS2.app`. One-time profile setup (interactive):
+NAPS2 (`/Applications/NAPS2.app`) covers point-and-click scanning. One-time profile: Profiles → New Profile → Driver **SANE** → device **ScanSnap iX500** → ADF Duplex, 300 dpi, Color → save as default. Then stack → Scan → Save PDF.
 
-1. Launch NAPS2. (First launch may show a Gatekeeper confirmation — the app is signed; click Open.)
-2. **Profiles → New Profile**
-3. Driver: **SANE** → device **ScanSnap iX500**
-4. Paper source: **ADF Duplex** (called "Feeder (front and back)" in some NAPS2 versions)
-5. Resolution: **300 dpi**, Bit depth: **Color**
-6. Name it **iX500 Duplex**, save, and set as default.
+## Getting Started
 
-Then: stack in ADF → click Scan → File → Save PDF.
+The tools assume SANE can see the iX500 over USB (see `ENVIRONMENT.md` for the recorded machine/scanner baseline). If anything misbehaves:
 
-## Known gotchas
+1. `scan-diag` — pass/fail with fix hints.
+2. `TROUBLESHOOTING.md` — known failure modes and fixes.
 
-- **USB only. WiFi will never work** — the iX500's wireless mode uses a proprietary protocol
-  that SANE/eSCL cannot speak. Don't waste time trying.
-- **Quit all ScanSnap/Fujitsu software** before scanning — it holds the USB device and SANE
-  will not see the scanner. Check with `pgrep -fl -i scansnap`. Leftover LaunchAgents may
-  relaunch it at login — see [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
-- **Prefer USB-2** — this model has documented flakiness on USB-3 ports. Currently connected
-  through an Anker USB-C hub; if scans hang or drop mid-batch, move it to a USB-2 port or a
-  powered USB-2 hub first.
-- **The lid is the power switch.** Scanner invisible? Open the lid.
-- No `sudo` was required for SANE on this machine (macOS 26.5.1, Homebrew sane-backends).
-
-## When something breaks
-
-```sh
-scan-diag
-```
-
-runs every check the stack depends on (USB presence, toolchain, SANE probe, backend
-enumeration, conflicting software) and prints pass/fail with a fix hint per failure.
-Deeper recovery steps: [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
-
-## Repo layout
+## Repo Layout
 
 ```
-bin/scan2pdf            one-command ADF → dated PDF
-bin/scan-checks         paycheck scanning → checksYYYYMMDD.pdf (or --staging for mixed stacks)
-bin/checks-split        manifest-driven split: per-paydate PDFs sorted by check number
-bin/checks-normalize    crop/deskew/uniform-landscape pass over a check PDF
-bin/scan-diag           diagnostics with pass/fail summary
-docs/device-options.txt full `scanimage -A` option dump for the iX500
-ENVIRONMENT.md          machine/scanner state recorded at install time
-TROUBLESHOOTING.md      recovery playbook
-PRD-ix500-mac-scanning.md  the original spec this was built from
+bin/                  # the six CLI tools (symlinked into ~/bin)
+docs/                 # device-options.txt (full scanimage option dump), plans/specs
+ENVIRONMENT.md        # machine + scanner baseline recorded at preflight
+PRD-ix500-mac-scanning.md   # original product requirements
+TROUBLESHOOTING.md    # failure modes and fixes
+test/                 # (empty placeholder)
 ```
+
+## Status
+
+In active use for document and paycheck scanning. The check workflow (scan → manifest → split → normalize → report) shipped 2026-06-11 (see `docs/superpowers/`). `test/` is an empty placeholder — the tools are verified by `scan-diag` and real scans rather than an automated suite.
