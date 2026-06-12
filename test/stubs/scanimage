@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+# Test stub for scanimage, driven by files in $SCANIMAGE_STUB_DIR:
+#   devices   output for -L (file absent -> no scanner found)
+#   sensor    yes/no, reported as the --page-loaded value in -A output
+#   feed      one line per pending chunk: page count the next batch scan yields
+# After serving a chunk the stub sets sensor to yes if feed lines remain, no
+# otherwise — mimicking paper sitting in the ADF.
+set -euo pipefail
+dir="${SCANIMAGE_STUB_DIR:?SCANIMAGE_STUB_DIR not set}"
+
+batch_pattern=""
+batch_start=1
+list=0
+dump=0
+for arg in "$@"; do
+  case "$arg" in
+    -L) list=1 ;;
+    -A) dump=1 ;;
+    --batch=*) batch_pattern="${arg#--batch=}" ;;
+    --batch-start=*) batch_start="${arg#--batch-start=}" ;;
+  esac
+done
+
+if (( list )); then
+  [[ -f "$dir/devices" ]] && cat "$dir/devices"
+  exit 0
+fi
+
+if (( dump )); then
+  s=$(cat "$dir/sensor" 2>/dev/null || echo no)
+  echo "    --page-loaded[=(yes|no)] [$s] [hardware]"
+  exit 0
+fi
+
+if [[ -n "$batch_pattern" ]]; then
+  count=0
+  if [[ -s "$dir/feed" ]]; then
+    count=$(head -1 "$dir/feed")
+    tail -n +2 "$dir/feed" > "$dir/feed.tmp" && mv "$dir/feed.tmp" "$dir/feed"
+  fi
+  for (( i = 0; i < count; i++ )); do
+    # shellcheck disable=SC2059
+    printf -v f "$batch_pattern" "$(( batch_start + i ))"
+    printf 'JPEGDATA' > "$f"
+  done
+  if [[ -s "$dir/feed" ]]; then echo yes > "$dir/sensor"; else echo no > "$dir/sensor"; fi
+  echo "scanimage: Document feeder out of documents" >&2
+  exit 7
+fi
+exit 0

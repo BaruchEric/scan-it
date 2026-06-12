@@ -1,0 +1,220 @@
+#!/usr/bin/env bash
+# scan-batch — continuous duplex scan loop for mixed-document batches.
+#
+# Scans until the ADF empties, then watches the iX500's page-loaded sensor and
+# resumes the moment more paper lands. Pages accumulate as per-page JPEGs in a
+# staging dir for the batch workflow (Claude analysis -> batch-file).
+#
+# Part of the ix500-scan project (~/Arik/dev/office/scan-it).
+set -euo pipefail
+
+scanimage_bin="${SCAN_BATCH_SCANIMAGE:-scanimage}"
+poll_secs="${SCAN_BATCH_POLL_SECS:-2}"
+
+usage() {
+  cat <<'EOF'
+Usage: scan-batch [options]
+
+Continuous batch scan from the iX500 ADF. Feed paper in any number of chunks;
+scanning resumes automatically when the paper sensor sees a new stack.
+
+End the batch by pressing Enter, or after --idle seconds with no paper.
+Ctrl-C preserves the staging dir (continue later with --resume).
+
+Options:
+  --idle N             end the batch after N seconds with no paper (default: 60)
+  -s, --simplex        front side only (default: duplex)
+  -g, --gray           grayscale (default: color)
+  -r, --resolution N   dpi (default: 300)
+  -o, --outdir DIR     parent dir for batch staging dirs
+                       (default: ~/Documents/Scans/.batches)
+  --resume DIR         continue an interrupted batch staging dir
+  -x, --scanopt ARG    extra option passed through to scanimage (repeatable)
+  -h, --help           show this help
+
+Exit codes:
+  0 success (>=1 page)   1 no scanner found   2 no pages scanned
+EOF
+}
+
+source_opt="ADF Duplex"
+mode="Color"
+resolution=300
+idle=60
+outparent="$HOME/Documents/Scans/.batches"
+resume_dir=""
+scanopts=()
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --idle)
+      [[ $# -ge 2 ]] || { echo "scan-batch: $1 requires a value" >&2; exit 64; }
+      idle="$2"; shift ;;
+    -s|--simplex) source_opt="ADF Front" ;;
+    -g|--gray) mode="Gray" ;;
+    -r|--resolution)
+      [[ $# -ge 2 ]] || { echo "scan-batch: $1 requires a value" >&2; exit 64; }
+      resolution="$2"; shift ;;
+    -o|--outdir)
+      [[ $# -ge 2 ]] || { echo "scan-batch: $1 requires a value" >&2; exit 64; }
+      outparent="$2"; shift ;;
+    --resume)
+      [[ $# -ge 2 ]] || { echo "scan-batch: $1 requires a value" >&2; exit 64; }
+      resume_dir="$2"; shift ;;
+    -x|--scanopt)
+      [[ $# -ge 2 ]] || { echo "scan-batch: $1 requires a value" >&2; exit 64; }
+      scanopts+=("$2"); shift ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "scan-batch: unknown argument: $1" >&2; usage >&2; exit 64 ;;
+  esac
+  shift
+done
+
+command -v jq >/dev/null 2>&1 || { echo "scan-batch: jq not found" >&2; exit 1; }
+command -v "$scanimage_bin" >/dev/null 2>&1 \
+  || { echo "scan-batch: '$scanimage_bin' not found" >&2; exit 1; }
+
+discover_device() {
+  "$scanimage_bin" -L 2>/dev/null | grep -i fujitsu | head -1 \
+    | sed -e 's/^device `//' -e "s/' is a.*//" || true
+}
+
+device=$(discover_device)
+if [[ -z "$device" ]]; then
+  echo "scan-batch: no Fujitsu scanner found." >&2
+  echo "  Check the lid is open (that powers it on) and USB is connected," >&2
+  echo "  then run scan-diag for a full checkup." >&2
+  exit 1
+fi
+
+if [[ -n "$resume_dir" ]]; then
+  staging="${resume_dir%/}"
+  [[ -d "$staging/pages" ]] || { echo "scan-batch: not a batch staging dir: $resume_dir" >&2; exit 66; }
+  batch_id=$(basename "$staging")
+  started=$(jq -r '.started // empty' "$staging/batch.json" 2>/dev/null || true)
+else
+  batch_id="batch-$(date +%Y%m%d-%H%M%S)"
+  staging="$outparent/$batch_id"
+  mkdir -p "$staging/pages"
+  started=""
+fi
+[[ -n "$started" ]] || started=$(date +%Y-%m-%dT%H:%M:%S%z)
+
+page_count() { find "$staging/pages" -name 'page-*.jpg' | wc -l | tr -d ' '; }
+
+chunk_counts=""   # space-separated page count per chunk this run
+
+write_batch_json() {
+  local arr="[]"
+  [[ -z "$chunk_counts" ]] || arr="[${chunk_counts// /,}]"
+  jq -n --arg id "$batch_id" --arg started "$started" \
+        --arg updated "$(date +%Y-%m-%dT%H:%M:%S%z)" \
+        --arg source "$source_opt" --arg mode "$mode" \
+        --argjson resolution "$resolution" \
+        --argjson pages "$(page_count)" --argjson chunks "$arr" \
+    '{batch: $id, started: $started, updated: $updated, source: $source,
+      mode: $mode, resolution: $resolution, pages: $pages, chunks: $chunks}' \
+    > "$staging/batch.json"
+}
+
+page_loaded() {
+  "$scanimage_bin" -d "$device" -A 2>/dev/null \
+    | grep -- '--page-loaded' | grep -q '\[yes\]'
+}
+
+# The iX500 has documented USB flakiness: if it drops off the bus, retry
+# discovery with backoff, then bail preserving the staging dir.
+ensure_device() {
+  local tries=0 d
+  while :; do
+    d=$(discover_device)
+    if [[ -n "$d" ]]; then device="$d"; return 0; fi
+    tries=$((tries + 1))
+    if (( tries >= 3 )); then
+      write_batch_json
+      echo "scan-batch: scanner disappeared mid-batch (USB?). Staging preserved." >&2
+      echo "  Resume with: scan-batch --resume $staging" >&2
+      exit 1
+    fi
+    sleep $(( tries * 2 ))
+  done
+}
+
+scan_chunk() {
+  local start=$(( $(page_count) + 1 ))
+  # In --batch mode scanimage always ends with "Document feeder out of
+  # documents" and nonzero status — the normal terminator, not an error.
+  set +e
+  "$scanimage_bin" -d "$device" --source "$source_opt" --mode "$mode" \
+    --resolution "$resolution" --format=jpeg \
+    --ald=yes --swdeskew=yes \
+    ${scanopts[@]+"${scanopts[@]}"} \
+    --batch="$staging/pages/page-%03d.jpg" --batch-start="$start" --progress
+  set -e
+}
+
+on_interrupt() {
+  write_batch_json
+  echo ""
+  echo "scan-batch: interrupted — staging preserved: $staging"
+  echo "  Resume with: scan-batch --resume $staging"
+  exit 130
+}
+trap on_interrupt INT
+
+finish() {
+  local total
+  total=$(page_count)
+  write_batch_json
+  if (( total == 0 )); then
+    [[ -n "$resume_dir" ]] || rm -rf "$staging"
+    echo "scan-batch: no pages scanned — nothing staged." >&2
+    exit 2
+  fi
+  if [[ "$source_opt" == "ADF Duplex" ]] && (( total % 2 != 0 )); then
+    echo "scan-batch: WARNING — odd page count ($total) from a duplex batch;" >&2
+    echo "  a multifeed (two sheets stuck together) is likely. Verify the pages." >&2
+  fi
+  echo "Batch complete: $total page(s)."
+  echo "$staging"
+  exit 0
+}
+
+# Block until paper lands (return 0) or the batch ends (Enter / idle timeout,
+# which calls finish and never returns).
+wait_for_paper() {
+  local waited=0
+  while (( waited < idle )); do
+    if [[ -t 0 ]]; then
+      # read doubles as the poll sleep and the Enter-to-end check.
+      if read -r -s -t "$poll_secs"; then finish; fi
+    else
+      sleep "$poll_secs"
+    fi
+    waited=$(( waited + poll_secs ))
+    if page_loaded; then return 0; fi
+    ensure_device
+  done
+  finish
+}
+
+echo "Batch $batch_id ($source_opt, $mode, ${resolution}dpi)"
+echo "Feed the ADF. Enter ends the batch; idle timeout ${idle}s."
+
+while :; do
+  if page_loaded; then
+    before=$(page_count)
+    scan_chunk
+    after=$(page_count)
+    if (( after > before )); then
+      chunk_counts="${chunk_counts:+$chunk_counts }$((after - before))"
+      echo "Chunk done: $((after - before)) page(s) — total $after."
+      write_batch_json
+    else
+      # sensor said paper but the scan produced nothing — device trouble
+      ensure_device
+    fi
+  else
+    wait_for_paper
+  fi
+done
