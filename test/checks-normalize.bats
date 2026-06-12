@@ -108,6 +108,49 @@ near() { # <value> <target> <tolerance>
   region_white "$TMP/r2.png" "400x200+1300+337"  # right half still blank
 }
 
+@test "light backing is still trimmed (single-corner test used to miss it)" {
+  # Backing at gray(86%) — light exposure renders real backing this light;
+  # the old 4-corner <0.85 test skipped these pages and left them untrimmed.
+  magick -size 2700x2700 xc:'gray(86%)' \
+    \( -size 1800x825 xc:white -fill black -draw 'rectangle 100,100 1700,725' \) \
+    -geometry +450+937 -composite "$TMP/front.png"
+  magick -size 2700x2700 xc:'gray(86%)' \
+    \( -size 1800x825 xc:white -fill black -draw 'rectangle 50,287 1750,537' \) \
+    -geometry +450+937 -composite "$TMP/back.png"
+  make_pdf "$TMP/c.pdf" "$TMP/front.png" "$TMP/back.png"
+  run "$CN" "$TMP/c.pdf"
+  [ "$status" -eq 0 ]
+  render_page "$TMP/c.pdf" 1 "$TMP/p1.png"
+  read -r w h <<<"$(dims "$TMP/p1.png")"
+  near "$w" 1800 12 && near "$h" 825 12
+  render_page "$TMP/c.pdf" 2 "$TMP/p2.png"
+  read -r w h <<<"$(dims "$TMP/p2.png")"
+  near "$w" 1800 12 && near "$h" 825 12
+}
+
+@test "washed-out sheet blending into backing at 12% fuzz: recovered, stable on re-run" {
+  # Sheet only 11% lighter than the backing: the 12% fuzz trim sees through
+  # the sheet and finds just the ink — the lower-fuzz retry must find the
+  # sheet, and a re-run must not erode or inflate the result.
+  magick -size 2700x2700 xc:'gray(89%)' \
+    \( -size 1800x825 xc:white -fill black -draw 'rectangle 100,300 1700,500' \) \
+    -geometry +450+937 -composite "$TMP/front.png"
+  magick -size 2700x2700 xc:'gray(89%)' \
+    \( -size 1800x825 xc:white -fill black -draw 'rectangle 100,300 1700,500' \) \
+    -geometry +450+937 -composite "$TMP/back.png"
+  make_pdf "$TMP/c.pdf" "$TMP/front.png" "$TMP/back.png"
+  run "$CN" "$TMP/c.pdf"
+  [ "$status" -eq 0 ]
+  render_page "$TMP/c.pdf" 1 "$TMP/p1.png"
+  read -r w1 h1 <<<"$(dims "$TMP/p1.png")"
+  near "$w1" 1800 12 && near "$h1" 825 12   # the sheet, not the 200px ink strip
+  run "$CN" "$TMP/c.pdf"
+  [ "$status" -eq 0 ]
+  render_page "$TMP/c.pdf" 1 "$TMP/p2.png"
+  read -r w2 h2 <<<"$(dims "$TMP/p2.png")"
+  near "$w2" "$w1" 8 && near "$h2" "$h1" 8
+}
+
 @test "odd page count: warns about pairing, still exits 0" {
   sheet_page "$TMP/p1.png" 1800 825 -draw 'rectangle 100,100 1700,725'
   sheet_page "$TMP/p2.png" 1800 825 -draw 'rectangle 50,287 800,537'

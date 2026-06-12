@@ -284,7 +284,7 @@ EOF
   [ ! -d "$OUT" ]
 }
 
-@test "paychecks route through checks-split and checks-normalize" {
+@test "paychecks route through checks-split, which normalizes each page" {
   page page-001.jpg "CHECK 1002" 1200x500
   page page-002.jpg "BACK 1002" 1200x500
   page page-003.jpg "CHECK 1001" 1200x500
@@ -306,12 +306,14 @@ EOF
   ]
 }
 EOF
-  # Stub checks-normalize: the real one re-renders at 300 dpi (slow, poppler);
-  # routing is what we test here, so just record the invocation.
+  # Stub checks-normalize: the real --page mode trims/deskews via magick
+  # (slow); routing is what we test here, so record each invocation and
+  # emulate --page with a copy-through.
   mkdir -p "$TMP/bin"
   cat > "$TMP/bin/checks-normalize" <<'EOF'
 #!/usr/bin/env bash
 echo "$@" >> "${NORMALIZE_LOG:?}"
+if [ "$1" = "--page" ]; then cp "$2" "$3"; fi
 EOF
   chmod +x "$TMP/bin/checks-normalize"
   export NORMALIZE_LOG="$TMP/normalize.log"
@@ -320,11 +322,13 @@ EOF
   [ "$status" -eq 0 ]
   [ -f "$OUT/paychecks/checks20260605.pdf" ]
   [ "$(qpdf --show-npages "$OUT/paychecks/checks20260605.pdf")" = "4" ]
-  # Exactly one invocation, on the per-paydate PDF — normalized BEFORE filing,
-  # so the argument is a workdir path, never the filed target.
-  [ "$(wc -l < "$NORMALIZE_LOG" | tr -d ' ')" = "1" ]
-  [ "$(basename "$(cat "$NORMALIZE_LOG")")" = "checks20260605.pdf" ]
-  [ "$(cat "$NORMALIZE_LOG")" != "$OUT/paychecks/checks20260605.pdf" ]
+  # One --page invocation per check side (front, back, front, back), on
+  # workdir images — normalized BEFORE filing; the filed target is never
+  # reprocessed.
+  [ "$(wc -l < "$NORMALIZE_LOG" | tr -d ' ')" = "4" ]
+  [ "$(awk '$1 != "--page"' "$NORMALIZE_LOG" | wc -l | tr -d ' ')" = "0" ]
+  [ "$(awk '{printf "%s ", $NF}' "$NORMALIZE_LOG")" = "front back front back " ]
+  ! grep -q "$OUT/paychecks" "$NORMALIZE_LOG"
 }
 
 @test "second batch appends paychecks without re-normalizing filed pages" {
@@ -345,6 +349,7 @@ EOF
   cat > "$TMP/bin/checks-normalize" <<'EOF'
 #!/usr/bin/env bash
 echo "$@" >> "${NORMALIZE_LOG:?}"
+if [ "$1" = "--page" ]; then cp "$2" "$3"; fi
 EOF
   chmod +x "$TMP/bin/checks-normalize"
   export NORMALIZE_LOG="$TMP/normalize.log"
@@ -374,9 +379,10 @@ EOF
     "$BATCH_FILE" -o "$OUT" --no-text-layer "$S2"
   [ "$status" -eq 0 ]
   [ "$(qpdf --show-npages "$OUT/paychecks/checks20260605.pdf")" = "4" ]
-  # One normalize call per batch, each on that batch's NEW pages only — the
+  # Two --page calls per batch, each on that batch's NEW pages only — the
   # already-filed target is never re-rendered (no cumulative JPEG loss).
-  [ "$(wc -l < "$NORMALIZE_LOG" | tr -d ' ')" = "2" ]
+  [ "$(wc -l < "$NORMALIZE_LOG" | tr -d ' ')" = "4" ]
+  [ "$(awk '$1 != "--page"' "$NORMALIZE_LOG" | wc -l | tr -d ' ')" = "0" ]
   ! grep -q "$OUT/paychecks/checks20260605.pdf" "$NORMALIZE_LOG"
 }
 

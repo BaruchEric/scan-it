@@ -4,7 +4,7 @@
 # Reads <staging>/manifest.json (written by Claude during the batch workflow),
 # validates it completely, then rotates, merges, renames, and files every
 # document; writes JSON sidecars and appends the global index. Paycheck
-# documents route through checks-split + checks-normalize unchanged.
+# documents route through checks-split, which normalizes each check.
 #
 # Part of the ix500-scan project (~/Arik/dev/office/scan-it).
 set -euo pipefail
@@ -216,9 +216,8 @@ done < <(jq -c '.documents[] | select(.type != "paycheck")' "$manifest")
 
 npay=$(jq '[.documents[] | select(.type == "paycheck")] | length' "$manifest")
 if (( npay > 0 )); then
-  for tool in checks-split checks-normalize; do
-    command -v "$tool" >/dev/null 2>&1 || { echo "batch-file: '$tool' not found" >&2; exit 1; }
-  done
+  command -v checks-split >/dev/null 2>&1 \
+    || { echo "batch-file: 'checks-split' not found" >&2; exit 1; }
   # Build a temporary staging PDF of just the check pages (unrotated — the
   # checks manifest carries the rotations) plus a checks-split manifest whose
   # page numbers index into that PDF: front back number paydate frot brot.
@@ -241,21 +240,19 @@ if (( npay > 0 )); then
     echo "batch-file: assembly failed for paycheck staging PDF" >&2
     exit 2
   fi
-  # Split and normalize in the workdir, and only then file into $outdir: a
-  # failure files no paycheck pages, and appending pre-normalized pages means
-  # already-filed checks are never re-rendered (no JPEG generation loss).
-  checks-split -o "$workdir/paychecks" "$workdir/checks-staging.pdf" "$cmanifest"
+  # Split in the workdir (checks-split normalizes each check's pages itself),
+  # and only then file into $outdir: a failure files no paycheck pages, and
+  # appending pre-normalized pages means already-filed checks are never
+  # re-rendered (no JPEG generation loss).
+  if ! checks-split -o "$workdir/paychecks" "$workdir/checks-staging.pdf" "$cmanifest"; then
+    echo "batch-file: checks-split failed" >&2
+    echo "  no paycheck pages were filed; the non-paycheck documents above" >&2
+    echo "  already were, so re-running this manifest would duplicate them —" >&2
+    echo "  fix the problem and re-file only the paycheck documents" >&2
+    exit 2
+  fi
   paydates=$(jq -r '.documents[] | select(.type == "paycheck") | .fields.paydate' "$manifest" \
     | tr -d '-' | sort -u)  # checks-split strips dashes when naming checksYYYYMMDD.pdf
-  while IFS= read -r d; do
-    if ! checks-normalize "$workdir/paychecks/checks$d.pdf"; then
-      echo "batch-file: checks-normalize failed for checks$d.pdf" >&2
-      echo "  no paycheck pages were filed; the non-paycheck documents above" >&2
-      echo "  already were, so re-running this manifest would duplicate them —" >&2
-      echo "  fix the problem and re-file only the paycheck documents" >&2
-      exit 2
-    fi
-  done <<<"$paydates"
   mkdir -p "$outdir/paychecks"
   while IFS= read -r d; do
     newpdf="$workdir/paychecks/checks$d.pdf"

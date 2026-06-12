@@ -1,19 +1,32 @@
 #!/usr/bin/env bash
-# checks-normalize — make every page of a check PDF uniform: scanner backing
-# trimmed away, deskewed, all pages landscape sheet-sized.
+# checks-normalize — make check pages uniform: scanner backing trimmed away,
+# deskewed, all pages landscape sheet-sized.
 #
-# Renders each page at 300 dpi (honoring page rotation), trims the gray
-# scanner backing, deskews residual tilt, cleans up ragged edges, rotates
-# portrait BACK pages (even page numbers) to landscape — bank-image
-# convention: endorsement strip along the left edge — and rebuilds the PDF
-# in place.
+# Two modes:
+#
+#   checks-normalize <checksYYYYMMDD.pdf> [more.pdf ...]
+#       Renders each page at 300 dpi (honoring page rotation), normalizes
+#       every page (backs are the even pages), and rebuilds the PDF in
+#       place. For fixing up existing or hand-merged PDFs — the standard
+#       pipeline (checks-split) normalizes each check's pages individually
+#       before assembly, so new PDFs no longer need this pass.
+#
+#   checks-normalize --page <in-image> <out.jpg> <front|back>
+#       Normalize one rendered page image. This is the per-check path used
+#       by checks-split: guarded backing trim, deskew, edge cleanup, and
+#       portrait backs rotated to landscape — bank-image convention:
+#       endorsement strip along the left edge.
 #
 # Every trim is guarded so it can only remove backing or edge fuzz, never
-# content: the backing trim runs only when gray backing is actually present
-# (corner test) and what remains is sheet-sized; the edge cleanup runs only
-# when it keeps at least 90% of both dimensions. Near-blank backs therefore
-# keep their full sheet — endorsement at its true position — instead of
-# collapsing to just the printed area.
+# content: the backing trim runs only when the page border reads as gray
+# backing (8-point edge sample), the trim box is sheet-sized, and the crop
+# removes at least 15% of the canvas; a washed-out sheet that blends into
+# the backing at 12% fuzz is retried at lower fuzz. Pages with nothing to
+# trim are passed through untouched — never deskewed or re-cropped — so
+# re-runs are stable. The edge cleanup runs only when it keeps at least 97%
+# of both dimensions. Near-blank backs therefore keep their full sheet —
+# endorsement at its true position — instead of collapsing to just the
+# printed area.
 #
 # Geometrically idempotent: re-running never rotates or crops further. Each
 # run does re-encode the page JPEGs, so avoid gratuitous re-runs.
@@ -25,20 +38,20 @@ shopt -s nullglob
 usage() {
   cat <<'EOF'
 Usage: checks-normalize <checksYYYYMMDD.pdf> [more.pdf ...]
+       checks-normalize --page <in-image> <out.jpg> <front|back>
 
-Run after checks-split (or after appending to a paydate PDF). Replaces each
-PDF in place with uniform sheet-sized landscape pages: front upright, back
-rotated to landscape like bank check images. Near-blank backs keep their
-full sheet rather than being cropped down to the printed area.
+PDF mode rebuilds each PDF in place with uniform sheet-sized landscape pages:
+front upright, back rotated to landscape like bank check images. Use it on
+existing or hand-merged PDFs; checks-split already normalizes what it writes.
+Near-blank backs keep their full sheet rather than being cropped down to the
+printed area.
+
+--page mode normalizes a single rendered page image (used by checks-split).
 EOF
 }
 
 [[ $# -ge 1 ]] || { usage >&2; exit 64; }
 if [[ "$1" == "-h" || "$1" == "--help" ]]; then usage; exit 0; fi
-
-for tool in pdftoppm magick img2pdf; do
-  command -v "$tool" >/dev/null 2>&1 || { echo "checks-normalize: '$tool' not found" >&2; exit 1; }
-done
 
 # Smallest plausible sheet dimension: 2 inches at 300 dpi. A trim that would
 # leave less than this in either direction is collapsing the page to its
@@ -47,14 +60,99 @@ min_sheet=600
 
 # Measurement format: "W H WxH+X+Y BACKING" — current canvas size, the
 # -fuzz trim box (with offset, so it can be applied later as a -crop), and
-# whether the corners are dark enough to be scanner backing rather than paper.
-measure='%w %h %@ %[fx:(p{0,0}.intensity+p{w-1,0}.intensity+p{0,h-1}.intensity+p{w-1,h-1}.intensity)/4<0.85?1:0]\n'
+# whether the border reads as scanner backing rather than paper: sampled at
+# 8 edge points (corners + edge midpoints) so a single dark corner artifact
+# cannot flip the verdict. Backing renders ~0.84–0.93 depending on exposure;
+# the margin of a normalized sheet reads ~0.96–1.0.
+measure='%w %h %@ %[fx:(p{0,0}.intensity+p{w/2,0}.intensity+p{w-1,0}.intensity+p{0,h/2}.intensity+p{w-1,h/2}.intensity+p{0,h-1}.intensity+p{w/2,h-1}.intensity+p{w-1,h-1}.intensity)/8<0.95?1:0]\n'
 
 parse_geom() { # <w> <h> <box> <backing> — validate measure output, set bw/bh
   [[ "$1" =~ ^[0-9]+$ && "$2" =~ ^[0-9]+$ && "$4" =~ ^[01]$ ]] || return 1
   bw=${3%%x*}; bh=${3#*x}; bh=${bh%%+*}
   [[ "$bw" =~ ^[0-9]+$ && "$bh" =~ ^[0-9]+$ ]]
 }
+
+normalize_page() { # <in-image> <out.jpg> <front|back> <context-label>
+  local in="$1" out="$2" role="$3" label="$4"
+  local w h box backing bw bh fz tpng
+  local crop=()
+
+  # Pass 1: find the sheet on the scanner backing, without committing yet.
+  # The crop is taken only when the border reads as backing, the box is
+  # sheet-sized, and it removes at least 15% of the canvas — a normalized
+  # page (paper border, nothing real to trim) is never re-cropped, and a
+  # near-blank back can never collapse to its ink. A washed-out sheet can
+  # blend into the backing at high fuzz — the box collapses to the ink, or
+  # to a PARTIAL sheet (the ink plus whatever edge survived) — so every
+  # fuzz level is measured and the LARGEST qualifying box wins: lower fuzz
+  # separates a washed sheet from the backing and recovers the full sheet.
+  local best_area=0 best_box=""
+  for fz in 12 10 8 6; do
+    if ! read -r w h box backing < <(magick -quiet "$in" -fuzz "$fz%" -format "$measure" info:) \
+        || ! parse_geom "$w" "$h" "$box" "$backing"; then
+      echo "checks-normalize: cannot measure $label" >&2; return 1
+    fi
+    (( backing == 1 )) || break
+    if (( bw >= min_sheet && bh >= min_sheet && bw * bh * 100 <= w * h * 85 \
+          && bw * bh > best_area )); then
+      best_area=$((bw * bh)); best_box="$box"
+    fi
+  done
+  [[ -n "$best_box" ]] && crop=(-crop "$best_box" +repage)
+
+  # Nothing to trim — the page was normalized before, or no backing is
+  # present. Pass it through untouched (portrait backs still get their
+  # landscape rotation): re-deskewing a near-blank normalized back can read
+  # a bogus angle off the endorsement stroke and pad the canvas, so leaving
+  # the page alone is the only stable behavior.
+  if [[ ${#crop[@]} -eq 0 ]]; then
+    local pass=()
+    if [[ "$role" == back ]] && (( h > w )); then pass=(-rotate 270); fi
+    magick -quiet "$in" ${pass[@]+"${pass[@]}"} -quality 85 "$out"
+    return 0
+  fi
+
+  # Trim the backing (when found), deskew, write the intermediate, and
+  # measure the residual-edge trim box of the deskewed image — one command.
+  tpng="$out.t.png"
+  if ! read -r w h box backing < <(magick -quiet "$in" ${crop[@]+"${crop[@]}"} \
+      -background white -deskew 40% \
+      -fuzz 12% -format "$measure" -write "$tpng" info:) \
+      || ! parse_geom "$w" "$h" "$box" "$backing"; then
+    echo "checks-normalize: cannot deskew $label" >&2; return 1
+  fi
+
+  # Pass 2: edge cleanup only — applied when it keeps at least 97% of both
+  # dimensions. Real edge fuzz is a sliver; anything deeper is sheet area
+  # (washed-out sheets read as border color at the edges and would erode a
+  # little more on every run if this were looser).
+  local args=()
+  if (( bw * 100 >= w * 97 && bh * 100 >= h * 97 )); then
+    args=(-crop "$box" +repage)
+    w=$bw; h=$bh
+  fi
+  # Back pages: portrait → landscape, one rotation at most. Already-
+  # landscape pages are never rotated, so re-runs are stable.
+  if [[ "$role" == back ]] && (( h > w )); then
+    args+=(-rotate 270)
+  fi
+  magick "$tpng" ${args[@]+"${args[@]}"} -quality 85 "$out"
+  rm -f "$tpng"
+}
+
+if [[ "$1" == "--page" ]]; then
+  [[ $# -eq 4 ]] || { usage >&2; exit 64; }
+  command -v magick >/dev/null 2>&1 || { echo "checks-normalize: 'magick' not found" >&2; exit 1; }
+  [[ -f "$2" ]] || { echo "checks-normalize: no such image: $2" >&2; exit 66; }
+  [[ "$4" == "front" || "$4" == "back" ]] \
+    || { echo "checks-normalize: role must be 'front' or 'back', got '$4'" >&2; exit 64; }
+  normalize_page "$2" "$3" "$4" "$2"
+  exit
+fi
+
+for tool in pdftoppm magick img2pdf; do
+  command -v "$tool" >/dev/null 2>&1 || { echo "checks-normalize: '$tool' not found" >&2; exit 1; }
+done
 
 for pdf in "$@"; do
   [[ -f "$pdf" ]] || { echo "checks-normalize: no such file: $pdf" >&2; exit 66; }
@@ -68,39 +166,8 @@ for pdf in "$@"; do
   for f in "$tmp"/p-*.png; do
     i=$((i + 1))
     out=$(printf '%s/n-%05d.jpg' "$tmp" "$i")
-
-    # Pass 1: find the sheet on the scanner backing, without committing yet.
-    if ! read -r w h box backing < <(magick -quiet "$f" -fuzz 12% -format "$measure" info:) \
-        || ! parse_geom "$w" "$h" "$box" "$backing"; then
-      echo "checks-normalize: cannot measure page $i of $pdf" >&2; exit 1
-    fi
-    crop=()
-    if (( backing == 1 && bw >= min_sheet && bh >= min_sheet )); then
-      crop=(-crop "$box" +repage)
-    fi
-
-    # Trim the backing (when found), deskew, write the intermediate, and
-    # measure the residual-edge trim box of the deskewed image — one command.
-    if ! read -r w h box backing < <(magick -quiet "$f" ${crop[@]+"${crop[@]}"} \
-        -background white -deskew 40% \
-        -fuzz 12% -format "$measure" -write "$tmp/t.png" info:) \
-        || ! parse_geom "$w" "$h" "$box" "$backing"; then
-      echo "checks-normalize: cannot deskew page $i of $pdf" >&2; exit 1
-    fi
-
-    # Pass 2: edge cleanup only — applied when it keeps at least 90% of both
-    # dimensions, so it can never collapse a near-blank page to its ink.
-    args=()
-    if (( bw * 10 >= w * 9 && bh * 10 >= h * 9 )); then
-      args=(-crop "$box" +repage)
-      w=$bw; h=$bh
-    fi
-    # Back pages (even page numbers): portrait → landscape, one rotation at
-    # most. Already-landscape pages are never rotated, so re-runs are stable.
-    if (( i % 2 == 0 && h > w )); then
-      args+=(-rotate 270)
-    fi
-    magick "$tmp/t.png" ${args[@]+"${args[@]}"} -quality 85 "$out"
+    role=front; (( i % 2 == 0 )) && role=back
+    normalize_page "$f" "$out" "$role" "page $i of $pdf" || exit 1
   done
 
   (( i > 0 )) || { echo "checks-normalize: no pages rendered from $pdf" >&2; exit 3; }

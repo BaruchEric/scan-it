@@ -6,11 +6,19 @@
 # which page of each duplex pair is the check front and how much to rotate,
 # so every output check is uniform (front upright, then back).
 #
+# Each check is normalized individually before assembly — both sides are
+# rendered upright at 300 dpi and run through checks-normalize --page
+# (backing trim, deskew, back rotated to landscape) — and the batch is then
+# completed from the finished pages. Output PDFs are uniform sheet-sized
+# landscape pages; no post-assembly normalize pass is needed, and appends
+# never re-encode existing pages.
+#
 # The manifest is produced by whoever can read the checks (Claude reads the
 # scanned pages); this script is the deterministic assembly step.
 #
 # Part of the ix500-scan project (~/Arik/dev/office/scan-it).
 set -euo pipefail
+shopt -s nullglob
 
 default_outdir="$HOME/Documents/Scans/paychecks"
 
@@ -39,8 +47,9 @@ Lines starting with # and blank lines are ignored. Load order, orientation,
 and side of the original stack do not matter — the manifest fixes all of it.
 
 For each distinct paydate, writes <outdir>/checksYYYYMMDD.pdf with the checks
-in check-number order (front, back, front, back...). If a target already
-exists, the new checks are APPENDED to it.
+in check-number order (front, back, front, back...), each page individually
+normalized (backing trimmed, deskewed, backs landscape). If a target already
+exists, the new checks are APPENDED to it without touching existing pages.
 
 Options:
   -o, --outdir DIR   output directory (default: $default_outdir)
@@ -70,7 +79,12 @@ done
 [[ -n "$pdf" && -n "$manifest" ]] || { usage >&2; exit 64; }
 [[ -f "$pdf" ]] || { echo "checks-split: no such PDF: $pdf" >&2; exit 66; }
 [[ -f "$manifest" ]] || { echo "checks-split: no such manifest: $manifest" >&2; exit 66; }
-command -v qpdf >/dev/null 2>&1 || { echo "checks-split: qpdf not found" >&2; exit 1; }
+for tool in qpdf pdftoppm magick img2pdf; do
+  command -v "$tool" >/dev/null 2>&1 || { echo "checks-split: '$tool' not found" >&2; exit 1; }
+done
+normalize=$(command -v checks-normalize || true)
+[[ -n "$normalize" ]] || normalize="$(cd "$(dirname "$0")" && pwd)/checks-normalize"
+[[ -x "$normalize" ]] || { echo "checks-split: checks-normalize not found" >&2; exit 1; }
 
 npages=$(qpdf --show-npages "$pdf")
 
@@ -112,32 +126,42 @@ done < "$manifest"
 
 mkdir -p "$outdir"
 
+render_page() { # <pdf-page> <rotation> <out.png> — render upright at 300 dpi
+  local page="$1" rot="$2" outpng="$3" d files
+  d=$(mktemp -d "$workdir/render.XXXXXX")
+  pdftoppm -png -r 300 -f "$page" -l "$page" "$pdf" "$d/p"
+  files=("$d"/p-*.png)
+  [[ ${#files[@]} -eq 1 ]] || { echo "checks-split: cannot render page $page" >&2; return 1; }
+  if [[ "$rot" != 0 ]]; then
+    magick "${files[0]}" -rotate "$rot" "$outpng"
+  else
+    mv "${files[0]}" "$outpng"
+  fi
+  rm -rf "$d"
+}
+
 while read -r date; do
   group="$workdir/group"
   awk -v d="$date" '$4 == d' "$clean" | sort -k3,3n > "$group"
   count=$(wc -l < "$group" | tr -d ' ')
 
-  # Page selection in check-number order: "front,back,front,back,..."
-  ranges=$(awk '{printf "%s%d,%d", sep, $1, $2; sep = ","}' "$group")
-  asm="$workdir/asm-$date.pdf"
-  qpdf --empty --pages "$pdf" "$ranges" -- "$asm"
-
-  # Apply rotations by output position: check i sits at pages 2i-1 (front), 2i (back).
-  p90=""; p180=""; p270=""
+  # Normalize each check individually — both sides rendered upright, backing
+  # trimmed, deskewed, back rotated to landscape — then complete the batch
+  # from the finished pages, in check-number order (front, back, front, ...).
   i=0
-  while read -r _ _ _ _ frot brot; do
+  while read -r front back _ _ frot brot; do
     i=$((i + 1))
-    case "$frot" in 90) p90="$p90,$((2*i-1))";; 180) p180="$p180,$((2*i-1))";; 270) p270="$p270,$((2*i-1))";; esac
-    case "$brot" in 90) p90="$p90,$((2*i))";; 180) p180="$p180,$((2*i))";; 270) p270="$p270,$((2*i))";; esac
+    render_page "$front" "$frot" "$workdir/raw.png"
+    "$normalize" --page "$workdir/raw.png" \
+      "$(printf '%s/n-%s-%05d.jpg' "$workdir" "$date" $((2 * i - 1)))" front
+    render_page "$back" "$brot" "$workdir/raw.png"
+    "$normalize" --page "$workdir/raw.png" \
+      "$(printf '%s/n-%s-%05d.jpg' "$workdir" "$date" $((2 * i)))" back
+    rm -f "$workdir/raw.png"
   done < "$group"
-  rotargs=()
-  [[ -n "$p90" ]] && rotargs+=("--rotate=+90:${p90#,}")
-  [[ -n "$p180" ]] && rotargs+=("--rotate=+180:${p180#,}")
-  [[ -n "$p270" ]] && rotargs+=("--rotate=+270:${p270#,}")
-  if [[ ${#rotargs[@]} -gt 0 ]]; then
-    qpdf "$asm" "$workdir/rot-$date.pdf" ${rotargs[@]+"${rotargs[@]}"}
-    asm="$workdir/rot-$date.pdf"
-  fi
+
+  asm="$workdir/asm-$date.pdf"
+  img2pdf --imgsize 300dpix300dpi "$workdir"/n-"$date"-*.jpg -o "$asm"
 
   target="$outdir/checks$date.pdf"
   if [[ -e "$target" ]]; then

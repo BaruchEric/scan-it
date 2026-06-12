@@ -8,7 +8,7 @@
 
 Today the stack handles two shapes of work: `scan2pdf` (whole stack → one dated PDF,
 no intelligence) and the paycheck pipeline (`scan-checks` → Claude manifest →
-`checks-split` → `checks-normalize`, checks only). There is no flow for a **mixed pile**
+`checks-split`, which normalizes each check; checks only). There is no flow for a **mixed pile**
 — receipts, invoices, paychecks, contracts, statements — where the user wants to feed
 paper continuously and end up with individually named, OCR'd, metadata-rich documents
 filed by type.
@@ -58,7 +58,7 @@ Claude reads sheets ──→ buckets.json (working file) ──→ bucket summa
                       │
 batch-file ──→ ~/Documents/Scans/<type>/<name>.pdf + <name>.json
             ──→ index.jsonl append
-            ──→ paycheck pages → checks-split → checks-normalize → checksYYYYMMDD.pdf
+            ──→ paycheck pages → checks-split (per-check normalize) → checksYYYYMMDD.pdf
             ──→ doubts → ~/Documents/Scans/review/
 ```
 
@@ -191,8 +191,8 @@ qpdf, optional ocrmypdf):
 6. **Paychecks:** collect all paycheck documents; build a temporary staging PDF of just
    those pages (img2pdf, in manifest order); generate a checks-split manifest
    (`<front> <back> <check_number> <paydate> <front_rot> <back_rot>` against that PDF);
-   run `checks-split`, then `checks-normalize` on each produced/updated
-   `checksYYYYMMDD.pdf`. Appending to existing paydate PDFs is handled by checks-split
+   run `checks-split` — it normalizes each check's pages itself, so no separate
+   normalize pass follows. Appending to existing paydate PDFs is handled by checks-split
    as today.
 7. **Review items:** rotate + assemble like normal docs, file into `review/` named
    `review-<batch>-<nn>.pdf` with a sidecar containing the reason and Claude's guess.

@@ -18,8 +18,8 @@ Eight CLI tools live in `bin/` (symlinked into `~/bin`, on PATH):
 |------|--------------|
 | `scan2pdf` | Scan an ADF stack to a dated multi-page PDF. Duplex/color/300 dpi by default; `-s` simplex, `-g` gray, `-r N` dpi, `-o DIR` outdir, `-p` lossless PNG intermediates, `-k` keep page images, `-x ARG` pass-through to `scanimage`, `--open` opens the PDF. Exit codes: 0 success · 1 no scanner · 2 empty ADF · 3 PDF assembly failure. |
 | `scan-checks` | Scan employee paychecks duplex (front + endorsement back) into one PDF per paydate (`checksYYYYMMDD.pdf`), pages in check-number order. Wraps `scan2pdf`; re-running a paydate appends, `--replace` starts over, `--staging` scans an unsorted stack for the manifest workflow. |
-| `checks-split` | Deterministic qpdf assembly: split a duplex staging PDF into per-paydate PDFs from a manifest (front/back page, check number, date, rotations), sorted by check number, validated before writing, appends to existing paydate PDFs. |
-| `checks-normalize` | Make every page of a check PDF uniform: render at 300 dpi, trim scanner backing (guarded — near-blank backs keep the full sheet instead of collapsing to the printed area), deskew, rotate portrait backs to landscape (bank-image convention), rebuild in place. Warns on odd page counts. Geometrically idempotent — re-running never rotates or crops further — though each run re-encodes the page JPEGs. |
+| `checks-split` | Split a duplex staging PDF into per-paydate PDFs from a manifest (front/back page, check number, date, rotations), sorted by check number, validated before writing. Normalizes each check individually (via `checks-normalize --page`) before assembling the batch, so output pages are already uniform; appends to existing paydate PDFs without re-encoding their pages. |
+| `checks-normalize` | Make check pages uniform: trim scanner backing (guarded — border must read as backing, the box must be sheet-sized, and the crop must remove ≥15%; the largest qualifying box across descending fuzz levels wins, so washed-out sheets are recovered whole), deskew, rotate portrait backs to landscape (bank-image convention). `--page <in> <out.jpg> <front\|back>` normalizes one rendered page (used by checks-split); PDF mode rebuilds an existing PDF in place and passes already-normalized pages through untouched, so re-runs are stable. Warns on odd page counts. |
 | `checks-report` | Per-paydate summary from a data file (`<check_number> <paydate> <amount> <signed>`): check counts, number sequences, missing numbers, period totals, unsigned checks, grand total. |
 | `scan-diag` | Diagnostics for the iX500 + SANE stack — colored pass/fail summary with a fix hint per failure. Changes nothing; safe any time. |
 | `scan-batch` | Scan a heterogeneous stack in chunks (paper sensor auto-resumes between chunks; press Enter or wait 60 s idle to end the batch). Exit codes: 0 success · 1 no scanner / device lost / jam · 2 no pages scanned · 64 usage · 66 bad `--resume` dir · 130 interrupted. |
@@ -33,14 +33,15 @@ Eight CLI tools live in `bin/` (symlinked into `~/bin`, on PATH):
 scan-checks --staging                 # any order, orientation, or side
 # Claude reads each scanned pair and writes a manifest, one line per check:
 #   <front_page> <back_page> <check_number> <YYYYMMDD> <front_rot> <back_rot>
-checks-split <staging.pdf> <manifest> # → checksYYYYMMDD.pdf per paydate
-checks-normalize checksYYYYMMDD.pdf   # crop + deskew + uniform landscape pages
+checks-split <staging.pdf> <manifest> # → checksYYYYMMDD.pdf per paydate,
+                                      #   each check normalized individually
 ```
 
 **Single known paydate, pre-sorted stack:**
 
 ```sh
-scan-checks 2026-06-05   # → checks20260605.pdf directly
+scan-checks 2026-06-05                # → checks20260605.pdf directly
+checks-normalize checks20260605.pdf   # raw (never-split) scans still need this
 ```
 
 The sort is physical: stack checks face up, lowest check number on top, then flip the whole stack face-down into the feeder, top edge first (the iX500 feeds from the bottom). Scans use `--ald` (auto length detection) and `--swdeskew`; an odd page count from a duplex scan triggers a multifeed warning.
@@ -82,12 +83,12 @@ contracts/      contract-2026-05-15-lease-renewal.pdf     + .json sidecar
 statements/     statement-2026-06-01-chase-checking.pdf   + .json sidecar
 letters/        letter-2026-06-10-irs-notice.pdf          + .json sidecar
 misc/           misc-2026-06-11-unknown.pdf               + .json sidecar
-paychecks/      checks20260605.pdf  (via checks-split/checks-normalize)
+paychecks/      checks20260605.pdf  (via checks-split, per-check normalized)
 review/         items Claude could not classify with confidence
 index.jsonl     one line per filed document (all types)
 ```
 
-Each `.json` sidecar contains the full OCR text, extracted fields (date, vendor, amount, etc.), and provenance (source scan, batch ID). Searchable text layers are embedded in the PDFs when `ocrmypdf` is installed (`brew install ocrmypdf` — optional; filing works without it). Paychecks are handed off to `checks-split` / `checks-normalize` and land in `paychecks/` exactly as the dedicated paycheck flow.
+Each `.json` sidecar contains the full OCR text, extracted fields (date, vendor, amount, etc.), and provenance (source scan, batch ID). Searchable text layers are embedded in the PDFs when `ocrmypdf` is installed (`brew install ocrmypdf` — optional; filing works without it). Paychecks are handed off to `checks-split` — which normalizes each check individually — and land in `paychecks/` exactly as the dedicated paycheck flow.
 
 ## GUI: NAPS2
 
@@ -113,4 +114,4 @@ TROUBLESHOOTING.md    # failure modes and fixes
 
 ## Status
 
-In active use for document and paycheck scanning. The check workflow (scan → manifest → split → normalize → report) shipped 2026-06-11. The mixed-batch workflow (scan-batch + batch-file) shipped 2026-06-11 (see `docs/superpowers/`). Automated bats suites cover scan-batch (8 tests), batch-file (18 tests), and checks-normalize (6 tests); run with `bats test/`.
+In active use for document and paycheck scanning. The check workflow (scan → manifest → split, normalizing each check → report) shipped 2026-06-11; per-check normalization inside checks-split landed 2026-06-12. The mixed-batch workflow (scan-batch + batch-file) shipped 2026-06-11 (see `docs/superpowers/`). Automated bats suites cover scan-batch (8 tests), batch-file (18 tests), and checks-normalize (8 tests); run with `bats test/`.
