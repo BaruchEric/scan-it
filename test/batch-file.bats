@@ -229,3 +229,57 @@ EOF
   [ "$status" -eq 0 ]
   [ -d "$STAGING" ]
 }
+
+@test "multi-page doc preserves each page (regression: temp-file collision)" {
+  page page-001.jpg FIRST 600x800
+  page page-002.jpg SECOND 800x600
+  cat > "$STAGING/manifest.json" <<'EOF'
+{
+  "batch": "batch-20260611-120000",
+  "documents": [
+    { "type": "misc", "name": "misc-2026-06-11-twopage",
+      "pages": [ { "file": "pages/page-001.jpg", "rotate": 0 },
+                 { "file": "pages/page-002.jpg", "rotate": 0 } ] }
+  ]
+}
+EOF
+  run "$BATCH_FILE" -o "$OUT" --no-text-layer "$STAGING"
+  [ "$status" -eq 0 ]
+  info=$(pdfinfo -f 1 -l 2 "$OUT/misc/misc-2026-06-11-twopage.pdf")
+  echo "$info" | grep 'Page    1' | grep -q '144 x 192'
+  echo "$info" | grep 'Page    2' | grep -q '192 x 144'
+}
+
+@test "assembly failure: exit 2, no orphan PDF, no index line" {
+  printf 'not a jpeg' > "$STAGING/pages/page-001.jpg"
+  cat > "$STAGING/manifest.json" <<'EOF'
+{
+  "batch": "batch-20260611-120000",
+  "documents": [
+    { "type": "misc", "name": "misc-2026-06-11-corrupt",
+      "pages": [ { "file": "pages/page-001.jpg", "rotate": 90 } ] }
+  ]
+}
+EOF
+  run "$BATCH_FILE" -o "$OUT" --no-text-layer "$STAGING"
+  [ "$status" -eq 2 ]
+  [ ! -e "$OUT/misc/misc-2026-06-11-corrupt.pdf" ]
+  [ ! -e "$OUT/index.jsonl" ]
+  [ -d "$STAGING" ]
+}
+
+@test "unsafe batch id: exit 1, nothing written" {
+  page page-001.jpg RECEIPT
+  cat > "$STAGING/manifest.json" <<'EOF'
+{
+  "batch": "../evil",
+  "documents": [
+    { "type": "receipt", "name": "receipt-2026-06-08-x",
+      "pages": [ { "file": "pages/page-001.jpg", "rotate": 0 } ] }
+  ]
+}
+EOF
+  run "$BATCH_FILE" -o "$OUT" --no-text-layer "$STAGING"
+  [ "$status" -eq 1 ]
+  [ ! -d "$OUT" ]
+}
