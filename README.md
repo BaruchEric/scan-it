@@ -19,7 +19,7 @@ Eight CLI tools live in `bin/` (symlinked into `~/bin`, on PATH):
 | `scan2pdf` | Scan an ADF stack to a dated multi-page PDF. Duplex/color/300 dpi by default; `-s` simplex, `-g` gray, `-r N` dpi, `-o DIR` outdir, `-p` lossless PNG intermediates, `-k` keep page images, `-x ARG` pass-through to `scanimage`, `--open` opens the PDF. Exit codes: 0 success · 1 no scanner · 2 empty ADF · 3 PDF assembly failure. |
 | `scan-checks` | Scan employee paychecks duplex (front + endorsement back) into one PDF per paydate (`checksYYYYMMDD.pdf`), pages in check-number order. Wraps `scan2pdf`; re-running a paydate appends, `--replace` starts over, `--staging` scans an unsorted stack for the manifest workflow. |
 | `checks-split` | Deterministic qpdf assembly: split a duplex staging PDF into per-paydate PDFs from a manifest (front/back page, check number, date, rotations), sorted by check number, validated before writing, appends to existing paydate PDFs. |
-| `checks-normalize` | Make every page of a check PDF uniform: render at 300 dpi, trim scanner background, deskew, rotate portrait backs to landscape (bank-image convention), rebuild in place. Idempotent — safe to re-run. |
+| `checks-normalize` | Make every page of a check PDF uniform: render at 300 dpi, trim scanner backing (guarded — near-blank backs keep the full sheet instead of collapsing to the printed area), deskew, rotate portrait backs to landscape (bank-image convention), rebuild in place. Warns on odd page counts. Geometrically idempotent — re-running never rotates or crops further — though each run re-encodes the page JPEGs. |
 | `checks-report` | Per-paydate summary from a data file (`<check_number> <paydate> <amount> <signed>`): check counts, number sequences, missing numbers, period totals, unsigned checks, grand total. |
 | `scan-diag` | Diagnostics for the iX500 + SANE stack — colored pass/fail summary with a fix hint per failure. Changes nothing; safe any time. |
 | `scan-batch` | Scan a heterogeneous stack in chunks (paper sensor auto-resumes between chunks; press Enter or wait 60 s idle to end the batch). Exit codes: 0 success · 1 no scanner / device lost / jam · 2 no pages scanned · 64 usage · 66 bad `--resume` dir · 130 interrupted. |
@@ -105,7 +105,7 @@ The tools assume SANE can see the iX500 over USB (see `ENVIRONMENT.md` for the r
 ```
 bin/                  # the eight CLI tools (symlinked into ~/bin)
 docs/                 # device-options.txt (full scanimage option dump), plans/specs
-test/                 # bats test suites: scan-batch.bats, batch-file.bats, stubs/
+test/                 # bats test suites: scan-batch.bats, batch-file.bats, checks-normalize.bats, stubs/
 ENVIRONMENT.md        # machine + scanner baseline recorded at preflight
 PRD-ix500-mac-scanning.md   # original product requirements
 TROUBLESHOOTING.md    # failure modes and fixes
@@ -113,4 +113,4 @@ TROUBLESHOOTING.md    # failure modes and fixes
 
 ## Status
 
-In active use for document and paycheck scanning. The check workflow (scan → manifest → split → normalize → report) shipped 2026-06-11. The mixed-batch workflow (scan-batch + batch-file) shipped 2026-06-11 (see `docs/superpowers/`). Automated bats suites cover scan-batch (8 tests) and batch-file (17 tests); run with `bats test/`.
+In active use for document and paycheck scanning. The check workflow (scan → manifest → split → normalize → report) shipped 2026-06-11. The mixed-batch workflow (scan-batch + batch-file) shipped 2026-06-11 (see `docs/superpowers/`). Automated bats suites cover scan-batch (8 tests), batch-file (18 tests), and checks-normalize (6 tests); run with `bats test/`.

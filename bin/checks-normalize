@@ -1,24 +1,35 @@
 #!/usr/bin/env bash
-# checks-normalize — make every page of a check PDF uniform: cropped to the
-# paper, deskewed, all pages landscape check-shaped.
+# checks-normalize — make every page of a check PDF uniform: scanner backing
+# trimmed away, deskewed, all pages landscape sheet-sized.
 #
-# Renders each page at 300 dpi (honoring page rotation), trims the scanner
-# background, deskews residual tilt, rotates portrait BACK pages (even page
-# numbers) to landscape — bank-image convention: endorsement strip along the
-# left edge — and rebuilds the PDF in place.
+# Renders each page at 300 dpi (honoring page rotation), trims the gray
+# scanner backing, deskews residual tilt, cleans up ragged edges, rotates
+# portrait BACK pages (even page numbers) to landscape — bank-image
+# convention: endorsement strip along the left edge — and rebuilds the PDF
+# in place.
 #
-# Safe to re-run: already-landscape pages are never rotated again.
+# Every trim is guarded so it can only remove backing or edge fuzz, never
+# content: the backing trim runs only when gray backing is actually present
+# (corner test) and what remains is sheet-sized; the edge cleanup runs only
+# when it keeps at least 90% of both dimensions. Near-blank backs therefore
+# keep their full sheet — endorsement at its true position — instead of
+# collapsing to just the printed area.
+#
+# Geometrically idempotent: re-running never rotates or crops further. Each
+# run does re-encode the page JPEGs, so avoid gratuitous re-runs.
 #
 # Part of the ix500-scan project (~/Arik/dev/office/scan-it).
 set -euo pipefail
+shopt -s nullglob
 
 usage() {
   cat <<'EOF'
 Usage: checks-normalize <checksYYYYMMDD.pdf> [more.pdf ...]
 
 Run after checks-split (or after appending to a paydate PDF). Replaces each
-PDF in place with uniform check-sized landscape pages: front upright, back
-rotated to landscape like bank check images.
+PDF in place with uniform sheet-sized landscape pages: front upright, back
+rotated to landscape like bank check images. Near-blank backs keep their
+full sheet rather than being cropped down to the printed area.
 EOF
 }
 
@@ -29,6 +40,22 @@ for tool in pdftoppm magick img2pdf; do
   command -v "$tool" >/dev/null 2>&1 || { echo "checks-normalize: '$tool' not found" >&2; exit 1; }
 done
 
+# Smallest plausible sheet dimension: 2 inches at 300 dpi. A trim that would
+# leave less than this in either direction is collapsing the page to its
+# printed area (endorsement strip, stamp), not finding the sheet — skip it.
+min_sheet=600
+
+# Measurement format: "W H WxH+X+Y BACKING" — current canvas size, the
+# -fuzz trim box (with offset, so it can be applied later as a -crop), and
+# whether the corners are dark enough to be scanner backing rather than paper.
+measure='%w %h %@ %[fx:(p{0,0}.intensity+p{w-1,0}.intensity+p{0,h-1}.intensity+p{w-1,h-1}.intensity)/4<0.85?1:0]\n'
+
+parse_geom() { # <w> <h> <box> <backing> — validate measure output, set bw/bh
+  [[ "$1" =~ ^[0-9]+$ && "$2" =~ ^[0-9]+$ && "$4" =~ ^[01]$ ]] || return 1
+  bw=${3%%x*}; bh=${3#*x}; bh=${bh%%+*}
+  [[ "$bw" =~ ^[0-9]+$ && "$bh" =~ ^[0-9]+$ ]]
+}
+
 for pdf in "$@"; do
   [[ -f "$pdf" ]] || { echo "checks-normalize: no such file: $pdf" >&2; exit 66; }
   tmp=$(mktemp -d -t checks-normalize)
@@ -38,44 +65,49 @@ for pdf in "$@"; do
   pdftoppm -png -r 300 "$pdf" "$tmp/p"
 
   i=0
-  fw=0; fh=0
   for f in "$tmp"/p-*.png; do
     i=$((i + 1))
-    out=$(printf '%s/n-%03d.jpg' "$tmp" "$i")
-    # Trim the gray scanner backing, straighten residual tilt, trim again.
-    magick "$f" -fuzz 12% -trim +repage \
-      -background white -deskew 40% \
-      -fuzz 12% -trim +repage "$tmp/t.png"
-    read -r w h < <(magick identify -format '%w %h\n' "$tmp/t.png")
-    if (( i % 2 == 1 )); then
-      # Front page: remember its size — the back is the same physical sheet.
-      fw=$w; fh=$h
-      magick "$tmp/t.png" -quality 85 "$out"
-    else
-      # Back page: portrait → landscape (bank-image convention).
-      if (( h > w )); then
-        magick "$tmp/t.png" -rotate 270 "$tmp/t2.png"
-        mv "$tmp/t2.png" "$tmp/t.png"
-        t=$w; w=$h; h=$t
-      fi
-      # Near-blank backs over-crop to just the printed area; restore them to
-      # the front's size so every page stays check-sized and uniform.
-      if (( fw > 0 )) && (( w * 10 < fw * 9 || h * 10 < fh * 9 )); then
-        if (( h * 2 < fh )); then
-          # Sliver = the horizontal endorsement strip; stand it up vertically
-          # so it sits along the left edge like every other back.
-          magick "$tmp/t.png" -rotate 270 "$tmp/t2.png"
-          mv "$tmp/t2.png" "$tmp/t.png"
-        fi
-        magick "$tmp/t.png" -background white -gravity West \
-          -extent "${fw}x${fh}" -quality 85 "$out"
-      else
-        magick "$tmp/t.png" -quality 85 "$out"
-      fi
+    out=$(printf '%s/n-%05d.jpg' "$tmp" "$i")
+
+    # Pass 1: find the sheet on the scanner backing, without committing yet.
+    if ! read -r w h box backing < <(magick -quiet "$f" -fuzz 12% -format "$measure" info:) \
+        || ! parse_geom "$w" "$h" "$box" "$backing"; then
+      echo "checks-normalize: cannot measure page $i of $pdf" >&2; exit 1
     fi
+    crop=()
+    if (( backing == 1 && bw >= min_sheet && bh >= min_sheet )); then
+      crop=(-crop "$box" +repage)
+    fi
+
+    # Trim the backing (when found), deskew, write the intermediate, and
+    # measure the residual-edge trim box of the deskewed image — one command.
+    if ! read -r w h box backing < <(magick -quiet "$f" ${crop[@]+"${crop[@]}"} \
+        -background white -deskew 40% \
+        -fuzz 12% -format "$measure" -write "$tmp/t.png" info:) \
+        || ! parse_geom "$w" "$h" "$box" "$backing"; then
+      echo "checks-normalize: cannot deskew page $i of $pdf" >&2; exit 1
+    fi
+
+    # Pass 2: edge cleanup only — applied when it keeps at least 90% of both
+    # dimensions, so it can never collapse a near-blank page to its ink.
+    args=()
+    if (( bw * 10 >= w * 9 && bh * 10 >= h * 9 )); then
+      args=(-crop "$box" +repage)
+      w=$bw; h=$bh
+    fi
+    # Back pages (even page numbers): portrait → landscape, one rotation at
+    # most. Already-landscape pages are never rotated, so re-runs are stable.
+    if (( i % 2 == 0 && h > w )); then
+      args+=(-rotate 270)
+    fi
+    magick "$tmp/t.png" ${args[@]+"${args[@]}"} -quality 85 "$out"
   done
 
   (( i > 0 )) || { echo "checks-normalize: no pages rendered from $pdf" >&2; exit 3; }
+  if (( i % 2 == 1 )); then
+    echo "checks-normalize: WARNING — $pdf has an odd page count ($i);" \
+      "front/back pairing is off and back-page rotation may be misapplied" >&2
+  fi
 
   img2pdf --imgsize 300dpix300dpi "$tmp"/n-*.jpg -o "$tmp/out.pdf"
   mv "$tmp/out.pdf" "$pdf"

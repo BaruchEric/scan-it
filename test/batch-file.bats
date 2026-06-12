@@ -320,8 +320,64 @@ EOF
   [ "$status" -eq 0 ]
   [ -f "$OUT/paychecks/checks20260605.pdf" ]
   [ "$(qpdf --show-npages "$OUT/paychecks/checks20260605.pdf")" = "4" ]
-  # Exactly one invocation, sole argument the full paydate-PDF path.
-  [ "$(cat "$NORMALIZE_LOG")" = "$OUT/paychecks/checks20260605.pdf" ]
+  # Exactly one invocation, on the per-paydate PDF — normalized BEFORE filing,
+  # so the argument is a workdir path, never the filed target.
+  [ "$(wc -l < "$NORMALIZE_LOG" | tr -d ' ')" = "1" ]
+  [ "$(basename "$(cat "$NORMALIZE_LOG")")" = "checks20260605.pdf" ]
+  [ "$(cat "$NORMALIZE_LOG")" != "$OUT/paychecks/checks20260605.pdf" ]
+}
+
+@test "second batch appends paychecks without re-normalizing filed pages" {
+  page page-001.jpg "CHECK 1001" 1200x500
+  page page-002.jpg "BACK 1001" 1200x500
+  cat > "$STAGING/manifest.json" <<'EOF'
+{
+  "batch": "batch-20260611-120000",
+  "documents": [
+    { "type": "paycheck",
+      "pages": [ { "file": "pages/page-001.jpg", "rotate": 0 },
+                 { "file": "pages/page-002.jpg", "rotate": 0 } ],
+      "fields": { "check_number": 1001, "paydate": "20260605" } }
+  ]
+}
+EOF
+  mkdir -p "$TMP/bin"
+  cat > "$TMP/bin/checks-normalize" <<'EOF'
+#!/usr/bin/env bash
+echo "$@" >> "${NORMALIZE_LOG:?}"
+EOF
+  chmod +x "$TMP/bin/checks-normalize"
+  export NORMALIZE_LOG="$TMP/normalize.log"
+  run env PATH="$TMP/bin:$BATS_TEST_DIRNAME/../bin:$PATH" NORMALIZE_LOG="$NORMALIZE_LOG" \
+    "$BATCH_FILE" -o "$OUT" --no-text-layer "$STAGING"
+  [ "$status" -eq 0 ]
+  # Second batch, same paydate.
+  S2="$TMP/batch-20260611-130000"
+  mkdir -p "$S2/pages"
+  cat > "$S2/batch.json" <<'EOF'
+{"batch":"batch-20260611-130000","started":"2026-06-11T13:00:00-0400","resolution":300}
+EOF
+  STAGING="$S2" page page-001.jpg "CHECK 1002" 1200x500
+  STAGING="$S2" page page-002.jpg "BACK 1002" 1200x500
+  cat > "$S2/manifest.json" <<'EOF'
+{
+  "batch": "batch-20260611-130000",
+  "documents": [
+    { "type": "paycheck",
+      "pages": [ { "file": "pages/page-001.jpg", "rotate": 0 },
+                 { "file": "pages/page-002.jpg", "rotate": 0 } ],
+      "fields": { "check_number": 1002, "paydate": "20260605" } }
+  ]
+}
+EOF
+  run env PATH="$TMP/bin:$BATS_TEST_DIRNAME/../bin:$PATH" NORMALIZE_LOG="$NORMALIZE_LOG" \
+    "$BATCH_FILE" -o "$OUT" --no-text-layer "$S2"
+  [ "$status" -eq 0 ]
+  [ "$(qpdf --show-npages "$OUT/paychecks/checks20260605.pdf")" = "4" ]
+  # One normalize call per batch, each on that batch's NEW pages only — the
+  # already-filed target is never re-rendered (no cumulative JPEG loss).
+  [ "$(wc -l < "$NORMALIZE_LOG" | tr -d ' ')" = "2" ]
+  ! grep -q "$OUT/paychecks/checks20260605.pdf" "$NORMALIZE_LOG"
 }
 
 @test "missing ocrmypdf: prints skip notice, still succeeds" {
