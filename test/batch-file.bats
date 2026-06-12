@@ -323,3 +323,17 @@ EOF
   # Exactly one invocation, sole argument the full paydate-PDF path.
   [ "$(cat "$NORMALIZE_LOG")" = "$OUT/paychecks/checks20260605.pdf" ]
 }
+
+@test "missing ocrmypdf: prints skip notice, still succeeds" {
+  page page-001.jpg RECEIPT
+  page page-002.jpg BLANK
+  receipt_manifest
+  mkdir -p "$TMP/toolbin"
+  for t in jq img2pdf jpegtran qpdf; do
+    ln -s "$(command -v "$t")" "$TMP/toolbin/$t"
+  done
+  run env PATH="$TMP/toolbin:/usr/bin:/bin" "$BATCH_FILE" -o "$OUT" "$STAGING"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"skipping searchable text layers"* ]]
+  [ -f "$OUT/receipts/receipt-2026-06-08-home-depot-45.23.pdf" ]
+}

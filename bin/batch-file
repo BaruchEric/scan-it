@@ -157,6 +157,25 @@ unique_target() { # <dir> <base> -> echoes a .pdf path that does not exist yet
   echo "$t"
 }
 
+warned_ocr=0
+
+add_text_layer() { # <pdf> — embed a searchable text layer in place
+  (( text_layer )) || return 0
+  if ! command -v ocrmypdf >/dev/null 2>&1; then
+    if (( ! warned_ocr )); then
+      echo "batch-file: ocrmypdf not installed — skipping searchable text layers"
+      warned_ocr=1
+    fi
+    return 0
+  fi
+  if ocrmypdf --quiet "$1" "$1.ocr.pdf" 2>/dev/null; then
+    mv "$1.ocr.pdf" "$1"
+  else
+    rm -f "$1.ocr.pdf"
+    echo "batch-file: WARNING — ocrmypdf failed on $(basename "$1"); kept image-only PDF" >&2
+  fi
+}
+
 now() { date +%Y-%m-%dT%H:%M:%S%z; }
 
 filed_count=0
@@ -173,6 +192,7 @@ file_document() { # <doc-json>
     echo "batch-file: assembly failed for $name" >&2
     return 1
   fi
+  add_text_layer "$pdf"
   jq -n --argjson doc "$doc" --arg batch "$batch_id" --arg scanned "$scanned_at" \
     '{type: $doc.type, name: $doc.name, fields: ($doc.fields // {}),
       text: ($doc.text // []), confidence: ($doc.confidence // "high"),
