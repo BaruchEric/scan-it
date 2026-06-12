@@ -1,0 +1,122 @@
+#!/usr/bin/env bash
+# scan2pdf — scan a stack from the ScanSnap iX500 ADF to a dated, multi-page PDF.
+#
+# Part of the ix500-scan project (~/Arik/dev/office/scan-it).
+# Troubleshooting: run scan-diag, or see TROUBLESHOOTING.md in the project repo.
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage: scan2pdf [options] [output-name]
+
+Drop a stack in the ADF, run this, get a dated PDF in ~/Documents/Scans.
+
+Options:
+  -s, --simplex        front side only (default: duplex)
+  -g, --gray           grayscale (default: color)
+  -r, --resolution N   dpi (default: 300)
+  -o, --outdir DIR     output directory (default: ~/Documents/Scans)
+  -k, --keep-pages     keep intermediate PNGs next to the PDF (default: delete)
+      --open           open the finished PDF in Preview
+  -h, --help           show this help
+
+Exit codes:
+  0 success   1 no scanner found   2 empty ADF / no pages   3 PDF assembly failure
+EOF
+}
+
+source_opt="ADF Duplex"
+mode="Color"
+resolution=300
+outdir="$HOME/Documents/Scans"
+keep_pages=0
+open_pdf=0
+name="scan"
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -s|--simplex) source_opt="ADF Front" ;;
+    -g|--gray) mode="Gray" ;;
+    -r|--resolution)
+      [[ $# -ge 2 ]] || { echo "scan2pdf: $1 requires a value" >&2; exit 64; }
+      resolution="$2"; shift ;;
+    -o|--outdir)
+      [[ $# -ge 2 ]] || { echo "scan2pdf: $1 requires a value" >&2; exit 64; }
+      outdir="$2"; shift ;;
+    -k|--keep-pages) keep_pages=1 ;;
+    --open) open_pdf=1 ;;
+    -h|--help) usage; exit 0 ;;
+    -*) echo "scan2pdf: unknown option: $1" >&2; usage >&2; exit 64 ;;
+    *) name="$1" ;;
+  esac
+  shift
+done
+
+for tool in scanimage img2pdf; do
+  if ! command -v "$tool" >/dev/null 2>&1; then
+    echo "scan2pdf: '$tool' not found — install with: brew install sane-backends img2pdf" >&2
+    exit 1
+  fi
+done
+
+# Auto-discover the iX500. scanimage -L prints:
+#   device `fujitsu:ScanSnap iX500:NNNN' is a FUJITSU ScanSnap iX500 scanner
+device=$(scanimage -L 2>/dev/null | grep -i fujitsu | head -1 \
+  | sed -e 's/^device `//' -e "s/' is a.*//" || true)
+if [[ -z "$device" ]]; then
+  echo "scan2pdf: no Fujitsu scanner found." >&2
+  echo "  Check the scanner lid is open (that powers it on) and USB is connected," >&2
+  echo "  then run scan-diag for a full checkup." >&2
+  exit 1
+fi
+
+tmpdir=$(mktemp -d -t scan2pdf)
+trap 'rm -rf "$tmpdir"' EXIT
+
+echo "Scanning from '$device' ($source_opt, $mode, ${resolution}dpi)..."
+# In --batch mode scanimage scans until the feeder is empty, then always ends
+# with "Document feeder out of documents" and a nonzero status — that is the
+# normal terminator, not an error. Page count is the real success signal.
+set +e
+scanimage -d "$device" --source "$source_opt" --mode "$mode" \
+  --resolution "$resolution" --format=png --batch="$tmpdir/page-%03d.png" \
+  --progress
+set -e
+
+shopt -s nullglob
+pages=("$tmpdir"/page-*.png)
+shopt -u nullglob
+
+if [[ ${#pages[@]} -eq 0 ]]; then
+  echo "scan2pdf: no pages scanned — is the ADF empty? Load a stack and retry." >&2
+  echo "  If pages were loaded, run scan-diag for troubleshooting." >&2
+  exit 2
+fi
+
+mkdir -p "$outdir"
+timestamp=$(date +%Y%m%d-%H%M%S)
+pdf="$outdir/$name-$timestamp.pdf"
+
+if ! img2pdf --output "$pdf" "${pages[@]}"; then
+  echo "scan2pdf: PDF assembly failed (img2pdf error above)." >&2
+  if [[ $keep_pages -eq 0 ]]; then
+    echo "  Re-run with --keep-pages to preserve the scanned PNGs." >&2
+  fi
+  exit 3
+fi
+
+if [[ $keep_pages -eq 1 ]]; then
+  pagedir="$outdir/$name-$timestamp-pages"
+  mkdir -p "$pagedir"
+  mv "${pages[@]}" "$pagedir/"
+fi
+
+size=$(du -h "$pdf" | cut -f1 | tr -d ' ')
+echo "Done: ${#pages[@]} page(s), $size"
+echo "$pdf"
+if [[ $keep_pages -eq 1 ]]; then
+  echo "Intermediate PNGs kept in: $pagedir"
+fi
+if [[ $open_pdf -eq 1 ]]; then
+  open "$pdf"
+fi

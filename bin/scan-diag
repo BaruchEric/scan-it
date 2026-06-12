@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+# scan-diag — diagnostics for the ScanSnap iX500 + SANE scanning stack.
+#
+# Runs every check the stack depends on and prints a colored pass/fail summary
+# with a fix hint for each failure. Safe to run any time; changes nothing.
+set -uo pipefail
+
+if [[ -t 1 ]]; then
+  green=$'\033[32m' red=$'\033[31m' bold=$'\033[1m' reset=$'\033[0m'
+else
+  green="" red="" bold="" reset=""
+fi
+
+pass=0
+fail=0
+
+ok()  { printf '%sPASS%s  %s\n' "$green" "$reset" "$1"; pass=$((pass+1)); }
+bad() { printf '%sFAIL%s  %s\n      hint: %s\n' "$red" "$reset" "$1" "$2"; fail=$((fail+1)); }
+
+printf '%sscan-diag — ScanSnap iX500 scanning stack%s\n\n' "$bold" "$reset"
+
+# 1. USB presence. NOTE: system_profiler SPUSBDataType returns empty output on
+# macOS 26 (observed 26.5.1), so we use ioreg instead.
+if ioreg -p IOUSB -l -w0 2>/dev/null | grep -qi "ScanSnap iX500"; then
+  ok "iX500 visible on USB (ioreg)"
+else
+  bad "iX500 visible on USB (ioreg)" \
+    "open the scanner lid (powers it on), reseat the USB cable, prefer a USB-2 port or powered hub"
+fi
+
+# 2. Toolchain installed
+if command -v scanimage >/dev/null 2>&1; then
+  ok "sane-backends installed (scanimage)"
+else
+  bad "sane-backends installed (scanimage)" "brew install sane-backends"
+fi
+
+if command -v img2pdf >/dev/null 2>&1; then
+  ok "img2pdf installed"
+else
+  bad "img2pdf installed" "brew install img2pdf"
+fi
+
+# 3. Fujitsu/PFU software must not be running — it holds the USB device.
+fujitsu_procs=$(pgrep -fl -i "scansnap" 2>/dev/null || true)
+if [[ -z "$fujitsu_procs" ]]; then
+  ok "no Fujitsu/ScanSnap software running"
+else
+  bad "no Fujitsu/ScanSnap software running" \
+    "quit it: pkill -i scansnap — and see TROUBLESHOOTING.md about its LaunchAgents. Found: $fujitsu_procs"
+fi
+
+# 4. Low-level SANE USB probe
+if command -v sane-find-scanner >/dev/null 2>&1; then
+  if sane-find-scanner -q 2>/dev/null | grep -q "0x132b"; then
+    ok "sane-find-scanner sees the iX500 (0x04c5/0x132b)"
+  else
+    bad "sane-find-scanner sees the iX500 (0x04c5/0x132b)" \
+      "replug the scanner; make sure no ScanSnap software is holding it"
+  fi
+else
+  bad "sane-find-scanner available" "brew install sane-backends"
+fi
+
+# 5. SANE backend enumeration (the check that matters most)
+if command -v scanimage >/dev/null 2>&1; then
+  if scanimage -L 2>/dev/null | grep -qi "fujitsu"; then
+    ok "scanimage -L lists the fujitsu device"
+  else
+    bad "scanimage -L lists the fujitsu device" \
+      "check 'fujitsu' is uncommented in \$(brew --prefix)/etc/sane.d/dll.conf; try 'sudo scanimage -L' (permissions); see TROUBLESHOOTING.md"
+  fi
+else
+  bad "scanimage -L lists the fujitsu device" "brew install sane-backends"
+fi
+
+printf '\n%s%d passed, %d failed%s\n' "$bold" "$pass" "$fail" "$reset"
+if [[ $fail -gt 0 ]]; then
+  printf 'See TROUBLESHOOTING.md in ~/Arik/dev/office/scan-it for recovery steps.\n'
+  exit 1
+fi
