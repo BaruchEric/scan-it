@@ -10,6 +10,7 @@ set -euo pipefail
 
 scanimage_bin="${SCAN_BATCH_SCANIMAGE:-scanimage}"
 poll_secs="${SCAN_BATCH_POLL_SECS:-2}"
+[[ "$poll_secs" =~ ^[0-9]+$ ]] && (( poll_secs >= 1 )) || poll_secs=2
 
 usage() {
   cat <<'EOF'
@@ -33,7 +34,9 @@ Options:
   -h, --help           show this help
 
 Exit codes:
-  0 success (>=1 page)   1 no scanner found   2 no pages scanned
+  0 success (>=1 page)        1 no scanner / device lost / jam
+  2 no pages scanned          64 usage error
+  66 bad --resume dir         130 interrupted (Ctrl-C)
 EOF
 }
 
@@ -49,11 +52,13 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --idle)
       [[ $# -ge 2 ]] || { echo "scan-batch: $1 requires a value" >&2; exit 64; }
+      [[ "$2" =~ ^[0-9]+$ ]] || { echo "scan-batch: $1 requires an integer value" >&2; exit 64; }
       idle="$2"; shift ;;
     -s|--simplex) source_opt="ADF Front" ;;
     -g|--gray) mode="Gray" ;;
     -r|--resolution)
       [[ $# -ge 2 ]] || { echo "scan-batch: $1 requires a value" >&2; exit 64; }
+      [[ "$2" =~ ^[0-9]+$ ]] || { echo "scan-batch: $1 requires an integer value" >&2; exit 64; }
       resolution="$2"; shift ;;
     -o|--outdir)
       [[ $# -ge 2 ]] || { echo "scan-batch: $1 requires a value" >&2; exit 64; }
@@ -102,6 +107,8 @@ fi
 
 page_count() { find "$staging/pages" -name 'page-*.jpg' | wc -l | tr -d ' '; }
 
+# chunks in batch.json records this run only — a resumed batch does not
+# re-derive earlier chunk boundaries.
 chunk_counts=""   # space-separated page count per chunk this run
 
 write_batch_json() {
@@ -201,18 +208,30 @@ wait_for_paper() {
 echo "Batch $batch_id ($source_opt, $mode, ${resolution}dpi)"
 echo "Feed the ADF. Enter ends the batch; idle timeout ${idle}s."
 
+zero_scans=0   # consecutive scans where the sensor saw paper but 0 pages fed
+
 while :; do
   if page_loaded; then
     before=$(page_count)
     scan_chunk
     after=$(page_count)
     if (( after > before )); then
+      zero_scans=0
       chunk_counts="${chunk_counts:+$chunk_counts }$((after - before))"
       echo "Chunk done: $((after - before)) page(s) — total $after."
       write_batch_json
     else
-      # sensor said paper but the scan produced nothing — device trouble
+      # sensor said paper but the scan produced nothing — jam/misfeed,
+      # or device trouble
+      zero_scans=$(( zero_scans + 1 ))
+      if (( zero_scans >= 3 )); then
+        write_batch_json
+        echo "scan-batch: paper detected but nothing feeding (jam or misfeed?). Staging preserved." >&2
+        echo "  Re-seat the stack, then resume with: scan-batch --resume $staging" >&2
+        exit 1
+      fi
       ensure_device
+      sleep "$poll_secs"
     fi
   else
     wait_for_paper

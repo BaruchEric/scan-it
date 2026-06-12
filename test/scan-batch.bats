@@ -75,3 +75,17 @@ teardown() { rm -rf "$TMP"; }
   [ "$(jq -r '.pages' "$staging/batch.json")" = "4" ]
   [ "$(jq -r '.started' "$staging/batch.json")" = "2026-06-11T00:00:00-0400" ]
 }
+
+@test "rejects non-integer --idle at parse time" {
+  run "$SCAN_BATCH" -o "$BATCHES" --idle abc
+  [ "$status" -eq 64 ]
+  [[ "$output" == *"requires an integer"* ]]
+}
+
+@test "bails out after repeated zero-page scans (jam) instead of spinning" {
+  printf '0\n0\n0\n0\n0\n' > "$SCANIMAGE_STUB_DIR/feed"
+  echo yes > "$SCANIMAGE_STUB_DIR/sensor"
+  run "$SCAN_BATCH" -o "$BATCHES" --idle 30
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"nothing feeding"* ]]
+}
