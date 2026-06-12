@@ -283,3 +283,42 @@ EOF
   [ "$status" -eq 1 ]
   [ ! -d "$OUT" ]
 }
+
+@test "paychecks route through checks-split and checks-normalize" {
+  page page-001.jpg "CHECK 1002" 1200x500
+  page page-002.jpg "BACK 1002" 1200x500
+  page page-003.jpg "CHECK 1001" 1200x500
+  page page-004.jpg "BACK 1001" 1200x500
+  cat > "$STAGING/manifest.json" <<'EOF'
+{
+  "batch": "batch-20260611-120000",
+  "documents": [
+    { "type": "paycheck",
+      "pages": [ { "file": "pages/page-001.jpg", "rotate": 0 },
+                 { "file": "pages/page-002.jpg", "rotate": 0 } ],
+      "fields": { "check_number": 1002, "paydate": "20260605",
+                  "payee": "Jane Doe", "amount": 1234.56 } },
+    { "type": "paycheck",
+      "pages": [ { "file": "pages/page-003.jpg", "rotate": 0 },
+                 { "file": "pages/page-004.jpg", "rotate": 0 } ],
+      "fields": { "check_number": 1001, "paydate": "20260605",
+                  "payee": "John Doe", "amount": 1100.00 } }
+  ]
+}
+EOF
+  # Stub checks-normalize: the real one re-renders at 300 dpi (slow, poppler);
+  # routing is what we test here, so just record the invocation.
+  mkdir -p "$TMP/bin"
+  cat > "$TMP/bin/checks-normalize" <<'EOF'
+#!/usr/bin/env bash
+echo "$@" >> "${NORMALIZE_LOG:?}"
+EOF
+  chmod +x "$TMP/bin/checks-normalize"
+  export NORMALIZE_LOG="$TMP/normalize.log"
+  run env PATH="$TMP/bin:$BATS_TEST_DIRNAME/../bin:$PATH" NORMALIZE_LOG="$NORMALIZE_LOG" \
+    "$BATCH_FILE" -o "$OUT" --no-text-layer "$STAGING"
+  [ "$status" -eq 0 ]
+  [ -f "$OUT/paychecks/checks20260605.pdf" ]
+  [ "$(qpdf --show-npages "$OUT/paychecks/checks20260605.pdf")" = "4" ]
+  grep -q "checks20260605.pdf" "$NORMALIZE_LOG"
+}

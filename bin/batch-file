@@ -192,6 +192,41 @@ while IFS= read -r doc; do
   file_document "$doc" || exit 2
 done < <(jq -c '.documents[] | select(.type != "paycheck")' "$manifest")
 
+# ---------- paychecks: reuse the existing checks pipeline ----------
+
+npay=$(jq '[.documents[] | select(.type == "paycheck")] | length' "$manifest")
+if (( npay > 0 )); then
+  for tool in checks-split checks-normalize; do
+    command -v "$tool" >/dev/null 2>&1 || { echo "batch-file: '$tool' not found" >&2; exit 1; }
+  done
+  # Build a temporary staging PDF of just the check pages (unrotated — the
+  # checks manifest carries the rotations) plus a checks-split manifest whose
+  # page numbers index into that PDF: front back number paydate frot brot.
+  cmanifest="$workdir/checks-manifest"
+  : > "$cmanifest"
+  imgs=()
+  p=0
+  while IFS= read -r doc; do
+    imgs+=("$staging/$(jq -r '.pages[0].file' <<<"$doc")")
+    imgs+=("$staging/$(jq -r '.pages[1].file' <<<"$doc")")
+    printf '%d %d %s %s %s %s\n' "$((p + 1))" "$((p + 2))" \
+      "$(jq -r '.fields.check_number' <<<"$doc")" \
+      "$(jq -r '.fields.paydate' <<<"$doc")" \
+      "$(jq -r '.pages[0].rotate' <<<"$doc")" \
+      "$(jq -r '.pages[1].rotate' <<<"$doc")" >> "$cmanifest"
+    p=$((p + 2))
+  done < <(jq -c '.documents[] | select(.type == "paycheck")' "$manifest")
+  if ! img2pdf --imgsize "${resolution}dpix${resolution}dpi" \
+       --output "$workdir/checks-staging.pdf" "${imgs[@]}"; then
+    echo "batch-file: assembly failed for paycheck staging PDF" >&2
+    exit 2
+  fi
+  checks-split -o "$outdir/paychecks" "$workdir/checks-staging.pdf" "$cmanifest"
+  while IFS= read -r d; do
+    checks-normalize "$outdir/paychecks/checks$d.pdf"
+  done < <(jq -r '.documents[] | select(.type == "paycheck") | .fields.paydate' "$manifest" | sort -u)
+fi
+
 # ---------- review items ----------
 
 nrev=$(jq '(.review // []) | length' "$manifest")
@@ -214,7 +249,7 @@ done
 
 # ---------- cleanup + summary ----------
 
-echo "Filed $filed_count document(s), $nrev held for review."
+echo "Filed $filed_count document(s), $npay paycheck(s), $nrev held for review."
 if (( keep_staging == 0 && nrev == 0 )); then
   rm -rf "$staging"
   echo "Staging removed."
