@@ -1,6 +1,6 @@
 # scan-it
 
-Open-source ScanSnap iX500 document-scanning stack for macOS — SANE-based CLI tools (scan2pdf, scan-checks, checks-split, checks-normalize, checks-report, scan-diag) that turn ADF stacks into dated, ordered PDFs over USB.
+Open-source ScanSnap iX500 document-scanning stack for macOS — SANE-based CLI tools (scan2pdf, scan-checks, checks-split, checks-normalize, checks-report, scan-diag, scan-batch, batch-file) that turn ADF stacks into dated, ordered PDFs over USB.
 
 ## TL;DR
 
@@ -12,7 +12,7 @@ Open-source ScanSnap iX500 document-scanning stack for macOS — SANE-based CLI 
 
 ## Overview
 
-Six CLI tools live in `bin/` (symlinked into `~/bin`, on PATH):
+Eight CLI tools live in `bin/` (symlinked into `~/bin`, on PATH):
 
 | Tool | What it does |
 |------|--------------|
@@ -22,6 +22,8 @@ Six CLI tools live in `bin/` (symlinked into `~/bin`, on PATH):
 | `checks-normalize` | Make every page of a check PDF uniform: render at 300 dpi, trim scanner background, deskew, rotate portrait backs to landscape (bank-image convention), rebuild in place. Idempotent — safe to re-run. |
 | `checks-report` | Per-paydate summary from a data file (`<check_number> <paydate> <amount> <signed>`): check counts, number sequences, missing numbers, period totals, unsigned checks, grand total. |
 | `scan-diag` | Diagnostics for the iX500 + SANE stack — colored pass/fail summary with a fix hint per failure. Changes nothing; safe any time. |
+| `scan-batch` | Scan a heterogeneous stack in chunks (paper sensor auto-resumes between chunks; press Enter or wait 60 s idle to end the batch). Exit codes: 0 success · 1 no scanner · 2 empty ADF · 3 assembly failure. |
+| `batch-file` | Validate, classify, rotate, merge, rename, and file the staged pages produced by `scan-batch`. Reads the manifest Claude writes to `<staging>/manifest.json`; refuses to write unless every scanned page is accounted for exactly once. Exit codes: 0 success · 1 missing/invalid manifest · 2 page-accounting mismatch · 3 write failure. |
 
 ## Paycheck workflow
 
@@ -43,6 +45,50 @@ scan-checks 2026-06-05   # → checks20260605.pdf directly
 
 The sort is physical: stack checks face up, lowest check number on top, then flip the whole stack face-down into the feeder, top edge first (the iX500 feeds from the bottom). Scans use `--ald` (auto length detection) and `--swdeskew`; an odd page count from a duplex scan triggers a multifeed warning.
 
+## Mixed batches
+
+For mixed stacks containing receipts, invoices, contracts, paychecks, and anything else in the same feeder run — Claude drives this end-to-end:
+
+**Step 1 — Scan (you drive the feeder, Claude watches):**
+
+```sh
+scan-batch                    # feed paper in chunks; the iX500 paper sensor
+                              # auto-resumes between chunks; press Enter or
+                              # wait 60 s idle to end the batch
+```
+
+`scan-batch` deposits page images into a timestamped staging directory (e.g. `~/Documents/Scans/.staging/batch-20260611-143022/`).
+
+**Step 2 — Classify (Claude reads and sorts):**
+
+Claude opens each scanned sheet, reads it with OCR, and sorts it into buckets: receipts, invoices, paychecks, contracts, statements, letters, misc. Claude prints a summary table and **waits for the user's "finalize" confirmation** before writing anything. Ambiguous items go to a `review/` bucket with the reason noted — Claude never silently guesses.
+
+**Step 3 — File (Claude writes the manifest, batch-file executes):**
+
+Once the user confirms, Claude writes `<staging>/manifest.json` describing every page's destination. Then:
+
+```sh
+batch-file <staging-dir>      # validates manifest, rotates/merges/renames,
+                              # files each document, refuses if any page is
+                              # unaccounted for
+```
+
+**Output layout under `~/Documents/Scans/`:**
+
+```
+receipts/       receipt-2026-06-08-home-depot-45.23.pdf   + .json sidecar
+invoices/       invoice-2026-06-01-acme-corp-1200.00.pdf  + .json sidecar
+contracts/      contract-2026-05-15-lease-renewal.pdf     + .json sidecar
+statements/     statement-2026-06-01-chase-checking.pdf   + .json sidecar
+letters/        letter-2026-06-10-irs-notice.pdf          + .json sidecar
+misc/           misc-2026-06-11-unknown.pdf               + .json sidecar
+paychecks/      checks20260605.pdf  (via checks-split/checks-normalize)
+review/         items Claude could not classify with confidence
+index.jsonl     one line per filed document (all types)
+```
+
+Each `.json` sidecar contains the full OCR text, extracted fields (date, vendor, amount, etc.), and provenance (source scan, batch ID). Searchable text layers are embedded in the PDFs when `ocrmypdf` is installed (`brew install ocrmypdf` — optional; filing works without it). Paychecks are handed off to `checks-split` / `checks-normalize` and land in `paychecks/` exactly as the dedicated paycheck flow.
+
 ## GUI: NAPS2
 
 NAPS2 (`/Applications/NAPS2.app`) covers point-and-click scanning. One-time profile: Profiles → New Profile → Driver **SANE** → device **ScanSnap iX500** → ADF Duplex, 300 dpi, Color → save as default. Then stack → Scan → Save PDF.
@@ -57,14 +103,14 @@ The tools assume SANE can see the iX500 over USB (see `ENVIRONMENT.md` for the r
 ## Repo Layout
 
 ```
-bin/                  # the six CLI tools (symlinked into ~/bin)
+bin/                  # the eight CLI tools (symlinked into ~/bin)
 docs/                 # device-options.txt (full scanimage option dump), plans/specs
+test/                 # bats test suites: scan-batch.bats, batch-file.bats, stubs/
 ENVIRONMENT.md        # machine + scanner baseline recorded at preflight
 PRD-ix500-mac-scanning.md   # original product requirements
 TROUBLESHOOTING.md    # failure modes and fixes
-test/                 # (empty placeholder)
 ```
 
 ## Status
 
-In active use for document and paycheck scanning. The check workflow (scan → manifest → split → normalize → report) shipped 2026-06-11 (see `docs/superpowers/`). `test/` is an empty placeholder — the tools are verified by `scan-diag` and real scans rather than an automated suite.
+In active use for document and paycheck scanning. The check workflow (scan → manifest → split → normalize → report) shipped 2026-06-11. The mixed-batch workflow (scan-batch + batch-file) shipped 2026-06-11 (see `docs/superpowers/`). Automated bats suites cover scan-batch (8 tests) and batch-file (17 tests); run with `bats test/`.
