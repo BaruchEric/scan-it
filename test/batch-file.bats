@@ -320,5 +320,6 @@ EOF
   [ "$status" -eq 0 ]
   [ -f "$OUT/paychecks/checks20260605.pdf" ]
   [ "$(qpdf --show-npages "$OUT/paychecks/checks20260605.pdf")" = "4" ]
-  grep -q "checks20260605.pdf" "$NORMALIZE_LOG"
+  # Exactly one invocation, sole argument the full paydate-PDF path.
+  [ "$(cat "$NORMALIZE_LOG")" = "$OUT/paychecks/checks20260605.pdf" ]
 }

@@ -222,8 +222,18 @@ if (( npay > 0 )); then
     exit 2
   fi
   checks-split -o "$outdir/paychecks" "$workdir/checks-staging.pdf" "$cmanifest"
+  # Past this point the check pages are FILED (checks-split appends to the
+  # paydate PDFs). A normalize failure must not invite a re-run of batch-file,
+  # which would append every check a second time.
   while IFS= read -r d; do
-    checks-normalize "$outdir/paychecks/checks$d.pdf"
+    d="${d//-/}"  # checks-split strips dashes when naming checksYYYYMMDD.pdf
+    if ! checks-normalize "$outdir/paychecks/checks$d.pdf"; then
+      echo "batch-file: checks-normalize failed for checks$d.pdf" >&2
+      echo "  checks-split already filed these pages — do NOT re-run batch-file" >&2
+      echo "  (it would append duplicates); fix and run:" >&2
+      echo "    checks-normalize $outdir/paychecks/checks$d.pdf" >&2
+      exit 2
+    fi
   done < <(jq -r '.documents[] | select(.type == "paycheck") | .fields.paydate' "$manifest" | sort -u)
 fi
 
