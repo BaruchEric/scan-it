@@ -22,7 +22,8 @@ Options:
   -g, --gray           grayscale (default: color)
   -r, --resolution N   dpi (default: 300)
   -o, --outdir DIR     output directory (default: ~/Documents/Scans)
-  -k, --keep-pages     keep intermediate PNGs next to the PDF
+  -p, --png            lossless PNG intermediates — PDFs ~20x bigger (default: JPEG)
+  -k, --keep-pages     keep intermediate page images next to the PDF
       --open           open the finished PDF in Preview
 ```
 

@@ -16,7 +16,8 @@ Options:
   -g, --gray           grayscale (default: color)
   -r, --resolution N   dpi (default: 300)
   -o, --outdir DIR     output directory (default: ~/Documents/Scans)
-  -k, --keep-pages     keep intermediate PNGs next to the PDF (default: delete)
+  -p, --png            lossless PNG intermediates — PDFs ~20x bigger (default: JPEG)
+  -k, --keep-pages     keep intermediate page images next to the PDF (default: delete)
       --open           open the finished PDF in Preview
   -h, --help           show this help
 
@@ -29,6 +30,8 @@ source_opt="ADF Duplex"
 mode="Color"
 resolution=300
 outdir="$HOME/Documents/Scans"
+img_format="jpeg"
+img_ext="jpg"
 keep_pages=0
 open_pdf=0
 name="scan"
@@ -43,6 +46,7 @@ while [[ $# -gt 0 ]]; do
     -o|--outdir)
       [[ $# -ge 2 ]] || { echo "scan2pdf: $1 requires a value" >&2; exit 64; }
       outdir="$2"; shift ;;
+    -p|--png) img_format="png"; img_ext="png" ;;
     -k|--keep-pages) keep_pages=1 ;;
     --open) open_pdf=1 ;;
     -h|--help) usage; exit 0 ;;
@@ -79,12 +83,12 @@ echo "Scanning from '$device' ($source_opt, $mode, ${resolution}dpi)..."
 # normal terminator, not an error. Page count is the real success signal.
 set +e
 scanimage -d "$device" --source "$source_opt" --mode "$mode" \
-  --resolution "$resolution" --format=png --batch="$tmpdir/page-%03d.png" \
-  --progress
+  --resolution "$resolution" --format="$img_format" \
+  --batch="$tmpdir/page-%03d.$img_ext" --progress
 set -e
 
 shopt -s nullglob
-pages=("$tmpdir"/page-*.png)
+pages=("$tmpdir"/page-*."$img_ext")
 shopt -u nullglob
 
 if [[ ${#pages[@]} -eq 0 ]]; then
@@ -97,10 +101,12 @@ mkdir -p "$outdir"
 timestamp=$(date +%Y%m%d-%H%M%S)
 pdf="$outdir/$name-$timestamp.pdf"
 
-if ! img2pdf --output "$pdf" "${pages[@]}"; then
+# --imgsize pins the physical page size from the known scan resolution, so the
+# PDF is correct even if the intermediate images carry no DPI metadata.
+if ! img2pdf --imgsize "${resolution}dpix${resolution}dpi" --output "$pdf" "${pages[@]}"; then
   echo "scan2pdf: PDF assembly failed (img2pdf error above)." >&2
   if [[ $keep_pages -eq 0 ]]; then
-    echo "  Re-run with --keep-pages to preserve the scanned PNGs." >&2
+    echo "  Re-run with --keep-pages to preserve the scanned page images." >&2
   fi
   exit 3
 fi
@@ -115,7 +121,7 @@ size=$(du -h "$pdf" | cut -f1 | tr -d ' ')
 echo "Done: ${#pages[@]} page(s), $size"
 echo "$pdf"
 if [[ $keep_pages -eq 1 ]]; then
-  echo "Intermediate PNGs kept in: $pagedir"
+  echo "Intermediate page images kept in: $pagedir"
 fi
 if [[ $open_pdf -eq 1 ]]; then
   open "$pdf"
