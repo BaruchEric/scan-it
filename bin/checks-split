@@ -1,0 +1,109 @@
+#!/usr/bin/env bash
+# checks-split — split a duplex check-stack PDF into one PDF per paydate,
+# checks sorted by check number, named checksYYYYMMDD.pdf.
+#
+# The manifest is produced by whoever can read the checks (Claude reads the
+# scanned fronts); this script is the deterministic assembly step.
+#
+# Part of the ix500-scan project (~/Arik/dev/office/scan-it).
+set -euo pipefail
+
+default_outdir="$HOME/Documents/Scans/paychecks"
+
+usage() {
+  cat <<EOF
+Usage: checks-split [options] <scanned.pdf> <manifest>
+
+Manifest: one line per check, whitespace-separated:
+
+    <front_page> <check_number> <paydate>
+
+  front_page    1-based PDF page of the check FRONT (back assumed at front+1)
+  check_number  digits; used for numeric sort within each paydate
+  paydate       YYYYMMDD or YYYY-MM-DD
+
+Lines starting with # and blank lines are ignored. Load order of the original
+stack does not matter — sorting comes from the manifest.
+
+For each distinct paydate, writes <outdir>/checksYYYYMMDD.pdf with the checks
+in check-number order (front, back, front, back...). If a target already
+exists, the new checks are APPENDED to it.
+
+Options:
+  -o, --outdir DIR   output directory (default: $default_outdir)
+  -h, --help         show this help
+EOF
+}
+
+outdir="$default_outdir"
+pdf=""
+manifest=""
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -o|--outdir)
+      [[ $# -ge 2 ]] || { echo "checks-split: $1 requires a value" >&2; exit 64; }
+      outdir="$2"; shift ;;
+    -h|--help) usage; exit 0 ;;
+    -*) echo "checks-split: unknown option: $1" >&2; usage >&2; exit 64 ;;
+    *)
+      if [[ -z "$pdf" ]]; then pdf="$1"
+      elif [[ -z "$manifest" ]]; then manifest="$1"
+      else echo "checks-split: too many arguments" >&2; exit 64; fi ;;
+  esac
+  shift
+done
+
+[[ -n "$pdf" && -n "$manifest" ]] || { usage >&2; exit 64; }
+[[ -f "$pdf" ]] || { echo "checks-split: no such PDF: $pdf" >&2; exit 66; }
+[[ -f "$manifest" ]] || { echo "checks-split: no such manifest: $manifest" >&2; exit 66; }
+command -v qpdf >/dev/null 2>&1 || { echo "checks-split: qpdf not found" >&2; exit 1; }
+
+npages=$(qpdf --show-npages "$pdf")
+
+# Validate every manifest line before writing anything.
+clean=$(mktemp -t checks-split)
+trap 'rm -f "$clean"' EXIT
+lineno=0
+while IFS= read -r line || [[ -n "$line" ]]; do
+  lineno=$((lineno + 1))
+  [[ "$line" =~ ^[[:space:]]*(#|$) ]] && continue
+  # shellcheck disable=SC2086
+  set -- $line
+  if [[ $# -ne 3 ]]; then
+    echo "checks-split: manifest line $lineno: expected 3 fields, got $#: $line" >&2; exit 65
+  fi
+  front="$1"; checknum="$2"; date="${3//-/}"
+  if [[ ! "$front" =~ ^[0-9]+$ ]] || (( front < 1 )) || (( front + 1 > npages )); then
+    echo "checks-split: manifest line $lineno: bad front page '$front' (PDF has $npages pages)" >&2; exit 65
+  fi
+  if [[ ! "$checknum" =~ ^[0-9]+$ ]]; then
+    echo "checks-split: manifest line $lineno: bad check number '$checknum'" >&2; exit 65
+  fi
+  if [[ ! "$date" =~ ^[0-9]{8}$ ]]; then
+    echo "checks-split: manifest line $lineno: bad paydate '$3' — use YYYYMMDD or YYYY-MM-DD" >&2; exit 65
+  fi
+  echo "$front $checknum $date" >> "$clean"
+done < "$manifest"
+
+[[ -s "$clean" ]] || { echo "checks-split: manifest has no check lines" >&2; exit 65; }
+
+mkdir -p "$outdir"
+
+while read -r date; do
+  # Page ranges in check-number order: "f1-b1,f2-b2,..."
+  ranges=$(awk -v d="$date" '$3 == d' "$clean" | sort -k2,2n \
+    | awk '{printf "%s%d-%d", sep, $1, $1 + 1; sep = ","}')
+  count=$(awk -v d="$date" '$3 == d' "$clean" | wc -l | tr -d ' ')
+  target="$outdir/checks$date.pdf"
+  tmppdf="$outdir/.checks$date.tmp.pdf"
+  if [[ -e "$target" ]]; then
+    qpdf --empty --pages "$target" 1-z "$pdf" "$ranges" -- "$tmppdf"
+    mv "$tmppdf" "$target"
+    total=$(qpdf --show-npages "$target")
+    echo "checks$date.pdf: appended $count check(s) — now $((total / 2)) check(s) ($total pages)"
+  else
+    qpdf --empty --pages "$pdf" "$ranges" -- "$target"
+    echo "checks$date.pdf: $count check(s) ($((count * 2)) pages)"
+  fi
+done < <(awk '{print $3}' "$clean" | sort -u)

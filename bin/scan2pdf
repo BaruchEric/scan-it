@@ -18,6 +18,8 @@ Options:
   -o, --outdir DIR     output directory (default: ~/Documents/Scans)
   -p, --png            lossless PNG intermediates — PDFs ~20x bigger (default: JPEG)
   -k, --keep-pages     keep intermediate page images next to the PDF (default: delete)
+  -x, --scanopt ARG    pass an extra option through to scanimage (repeatable),
+                       e.g. -x --ald=yes -x --swdeskew=yes
       --open           open the finished PDF in Preview
   -h, --help           show this help
 
@@ -35,6 +37,7 @@ img_ext="jpg"
 keep_pages=0
 open_pdf=0
 name="scan"
+scanopts=()
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -48,6 +51,9 @@ while [[ $# -gt 0 ]]; do
       outdir="$2"; shift ;;
     -p|--png) img_format="png"; img_ext="png" ;;
     -k|--keep-pages) keep_pages=1 ;;
+    -x|--scanopt)
+      [[ $# -ge 2 ]] || { echo "scan2pdf: $1 requires a value" >&2; exit 64; }
+      scanopts+=("$2"); shift ;;
     --open) open_pdf=1 ;;
     -h|--help) usage; exit 0 ;;
     -*) echo "scan2pdf: unknown option: $1" >&2; usage >&2; exit 64 ;;
@@ -84,6 +90,7 @@ echo "Scanning from '$device' ($source_opt, $mode, ${resolution}dpi)..."
 set +e
 scanimage -d "$device" --source "$source_opt" --mode "$mode" \
   --resolution "$resolution" --format="$img_format" \
+  ${scanopts[@]+"${scanopts[@]}"} \
   --batch="$tmpdir/page-%03d.$img_ext" --progress
 set -e
 

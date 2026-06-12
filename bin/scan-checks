@@ -1,0 +1,131 @@
+#!/usr/bin/env bash
+# scan-checks — scan employee paychecks (duplex, front + endorsement back)
+# into one PDF per paydate: checksYYYYMMDD.pdf, pages in check-number order.
+#
+# Part of the ix500-scan project (~/Arik/dev/office/scan-it). Wraps scan2pdf.
+set -euo pipefail
+
+default_outdir="$HOME/Documents/Scans/paychecks"
+
+usage() {
+  cat <<EOF
+Usage: scan-checks [options] [paydate]
+
+Scan a stack of paychecks duplex (front + back, so signatures/endorsements are
+captured) into a single PDF named checksYYYYMMDD.pdf for that paydate.
+
+Loading (this is what makes the PDF sorted by check number):
+  1. Arrange the checks FACE UP in check-number order, lowest number on top.
+  2. Flip the whole stack over, face-down into the feeder, top edge first.
+  The scanner feeds from the bottom, so the lowest check number scans first.
+
+Paydate: YYYYMMDD or YYYY-MM-DD (default: today).
+
+Options:
+  -o, --outdir DIR   output directory (default: $default_outdir)
+      --staging      mixed paydates / unsorted stack: scan to a staging PDF
+                     (no paydate naming) for later splitting with checks-split
+      --replace      overwrite an existing PDF for this paydate
+                     (default: append the new checks to it)
+      --open         open the finished PDF in Preview
+  -h, --help         show this help
+
+Exit codes:
+  0 success   1 no scanner found   2 empty ADF / no pages   3 PDF assembly failure
+EOF
+}
+
+outdir="$default_outdir"
+replace=0
+open_pdf=0
+staging=0
+paydate=""
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -o|--outdir)
+      [[ $# -ge 2 ]] || { echo "scan-checks: $1 requires a value" >&2; exit 64; }
+      outdir="$2"; shift ;;
+    --staging) staging=1 ;;
+    --replace) replace=1 ;;
+    --open) open_pdf=1 ;;
+    -h|--help) usage; exit 0 ;;
+    -*) echo "scan-checks: unknown option: $1" >&2; usage >&2; exit 64 ;;
+    *)
+      [[ -z "$paydate" ]] || { echo "scan-checks: only one paydate allowed" >&2; exit 64; }
+      paydate="$1" ;;
+  esac
+  shift
+done
+
+for tool in scan2pdf qpdf; do
+  if ! command -v "$tool" >/dev/null 2>&1; then
+    echo "scan-checks: '$tool' not found on PATH" >&2
+    exit 1
+  fi
+done
+
+# Staging mode: just scan duplex with the check options; splitting into
+# per-paydate files happens afterwards with checks-split.
+if [[ $staging -eq 1 ]]; then
+  [[ -z "$paydate" ]] || { echo "scan-checks: --staging takes no paydate" >&2; exit 64; }
+  mkdir -p "$outdir"
+  scan2pdf --outdir "$outdir" -x --ald=yes -x --swdeskew=yes checks-staging
+  echo "Next: read check numbers + dates off the fronts (odd pages), write a"
+  echo "manifest, then: checks-split <staging.pdf> <manifest>"
+  exit 0
+fi
+
+# Normalize and validate the paydate (local time, never UTC).
+if [[ -z "$paydate" ]]; then
+  paydate=$(date +%Y%m%d)
+else
+  paydate="${paydate//-/}"
+  if [[ ! "$paydate" =~ ^[0-9]{8}$ ]] \
+     || [[ "$(date -j -f %Y%m%d "$paydate" +%Y%m%d 2>/dev/null || true)" != "$paydate" ]]; then
+    echo "scan-checks: invalid paydate '$paydate' — use YYYYMMDD or YYYY-MM-DD" >&2
+    exit 64
+  fi
+fi
+
+target="$outdir/checks$paydate.pdf"
+if [[ -e "$target" && $replace -eq 0 ]]; then
+  echo "Note: $target already exists — new checks will be APPENDED to it."
+  echo "      (use --replace to start the paydate over)"
+fi
+
+tmpdir=$(mktemp -d -t scan-checks)
+trap 'rm -rf "$tmpdir"' EXIT
+
+# Duplex is the whole point (back side carries the endorsement signature).
+# --ald trims each page to the actual check length; --swdeskew straightens
+# the slight skew small documents pick up in the wide feeder.
+scan2pdf --outdir "$tmpdir" \
+  -x --ald=yes -x --swdeskew=yes \
+  checks
+
+newpdf=("$tmpdir"/checks-*.pdf)
+[[ -f "${newpdf[0]}" ]] || { echo "scan-checks: scan2pdf produced no PDF" >&2; exit 3; }
+
+pages=$(qpdf --show-npages "${newpdf[0]}")
+if (( pages % 2 != 0 )); then
+  echo "scan-checks: WARNING — odd page count ($pages) from a duplex scan;" >&2
+  echo "  a multifeed (two checks stuck together) is likely. Verify the PDF." >&2
+fi
+
+mkdir -p "$outdir"
+if [[ -e "$target" && $replace -eq 0 ]]; then
+  qpdf --empty --pages "$target" "${newpdf[0]}" -- "$tmpdir/merged.pdf"
+  mv "$tmpdir/merged.pdf" "$target"
+  total=$(qpdf --show-npages "$target")
+  echo "Appended $((pages / 2)) check(s) ($pages pages) — $target now holds $((total / 2)) check(s) ($total pages)."
+  echo "  Appended checks sit at the END of the file regardless of check number."
+else
+  mv "${newpdf[0]}" "$target"
+  echo "Done: $((pages / 2)) check(s) ($pages pages)"
+fi
+
+echo "$target"
+if [[ $open_pdf -eq 1 ]]; then
+  open "$target"
+fi

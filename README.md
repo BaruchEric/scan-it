@@ -24,12 +24,48 @@ Options:
   -o, --outdir DIR     output directory (default: ~/Documents/Scans)
   -p, --png            lossless PNG intermediates — PDFs ~20x bigger (default: JPEG)
   -k, --keep-pages     keep intermediate page images next to the PDF
+  -x, --scanopt ARG    pass an extra option through to scanimage (repeatable)
       --open           open the finished PDF in Preview
 ```
 
 Exit codes: `0` success · `1` no scanner · `2` empty ADF / no pages · `3` PDF assembly failure.
 
-Both tools live in `bin/` here and are symlinked into `~/bin` (on PATH).
+All tools live in `bin/` here and are symlinked into `~/bin` (on PATH).
+
+## Paychecks: scan-checks + checks-split
+
+One PDF per paydate, duplex (front + endorsement back), checks in check-number
+order, named `checksYYYYMMDD.pdf` (the date printed on the checks). Each check
+becomes two consecutive PDF pages (front, then back).
+
+**Mixed paydates / unsorted stack** (the usual case — Claude drives this):
+
+```sh
+scan-checks --staging                      # any order, no paydate needed
+# ...Claude reads check numbers + dates off the scanned fronts, writes a manifest:
+#    <front_page> <check_number> <YYYYMMDD>   (one line per check)
+checks-split <staging.pdf> <manifest>      # → checksYYYYMMDD.pdf per paydate
+```
+
+`checks-split` is deterministic qpdf assembly: groups by paydate, sorts by check
+number, validates the manifest before writing anything, and appends when a
+paydate PDF already exists.
+
+**Single known paydate, pre-sorted stack:**
+
+```sh
+scan-checks 2026-06-05   # → checks20260605.pdf directly
+```
+
+Here the sort is physical: stack the checks **face up, lowest check number on
+top**, then flip the whole stack face-down into the feeder, top edge first (the
+iX500 feeds from the bottom). Re-running the same paydate **appends** (for
+stacks over the ~50-sheet ADF limit, or a straggler check); `--replace` starts
+the paydate over.
+
+Scans use `--ald` (auto length detection — pages trimmed to actual check height)
+and `--swdeskew`. A duplex scan always yields an even page count; an odd count
+triggers a multifeed warning (two checks stuck together).
 
 ## GUI: NAPS2
 
@@ -71,6 +107,8 @@ Deeper recovery steps: [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
 
 ```
 bin/scan2pdf            one-command ADF → dated PDF
+bin/scan-checks         paycheck scanning → checksYYYYMMDD.pdf (or --staging for mixed stacks)
+bin/checks-split        manifest-driven split: per-paydate PDFs sorted by check number
 bin/scan-diag           diagnostics with pass/fail summary
 docs/device-options.txt full `scanimage -A` option dump for the iX500
 ENVIRONMENT.md          machine/scanner state recorded at install time
