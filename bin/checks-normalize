@@ -38,6 +38,7 @@ for pdf in "$@"; do
   pdftoppm -png -r 300 "$pdf" "$tmp/p"
 
   i=0
+  fw=0; fh=0
   for f in "$tmp"/p-*.png; do
     i=$((i + 1))
     out=$(printf '%s/n-%03d.jpg' "$tmp" "$i")
@@ -46,10 +47,31 @@ for pdf in "$@"; do
       -background white -deskew 40% \
       -fuzz 12% -trim +repage "$tmp/t.png"
     read -r w h < <(magick identify -format '%w %h\n' "$tmp/t.png")
-    if (( i % 2 == 0 && h > w )); then
-      magick "$tmp/t.png" -rotate 270 -quality 85 "$out"
-    else
+    if (( i % 2 == 1 )); then
+      # Front page: remember its size — the back is the same physical sheet.
+      fw=$w; fh=$h
       magick "$tmp/t.png" -quality 85 "$out"
+    else
+      # Back page: portrait → landscape (bank-image convention).
+      if (( h > w )); then
+        magick "$tmp/t.png" -rotate 270 "$tmp/t2.png"
+        mv "$tmp/t2.png" "$tmp/t.png"
+        t=$w; w=$h; h=$t
+      fi
+      # Near-blank backs over-crop to just the printed area; restore them to
+      # the front's size so every page stays check-sized and uniform.
+      if (( fw > 0 )) && (( w * 10 < fw * 9 || h * 10 < fh * 9 )); then
+        if (( h * 2 < fh )); then
+          # Sliver = the horizontal endorsement strip; stand it up vertically
+          # so it sits along the left edge like every other back.
+          magick "$tmp/t.png" -rotate 270 "$tmp/t2.png"
+          mv "$tmp/t2.png" "$tmp/t.png"
+        fi
+        magick "$tmp/t.png" -background white -gravity West \
+          -extent "${fw}x${fh}" -quality 85 "$out"
+      else
+        magick "$tmp/t.png" -quality 85 "$out"
+      fi
     fi
   done
 
