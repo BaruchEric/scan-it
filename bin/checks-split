@@ -2,8 +2,12 @@
 # checks-split — split a duplex check-stack PDF into one PDF per paydate,
 # checks sorted by check number, named checksYYYYMMDD.pdf.
 #
+# Handles stacks fed in mixed orientation and mixed side: the manifest says
+# which page of each duplex pair is the check front and how much to rotate,
+# so every output check is uniform (front upright, then back).
+#
 # The manifest is produced by whoever can read the checks (Claude reads the
-# scanned fronts); this script is the deterministic assembly step.
+# scanned pages); this script is the deterministic assembly step.
 #
 # Part of the ix500-scan project (~/Arik/dev/office/scan-it).
 set -euo pipefail
@@ -14,16 +18,25 @@ usage() {
   cat <<EOF
 Usage: checks-split [options] <scanned.pdf> <manifest>
 
-Manifest: one line per check, whitespace-separated:
+Manifest: one line per check, whitespace-separated, two accepted forms:
 
     <front_page> <check_number> <paydate>
+    <front_page> <back_page> <check_number> <paydate> <front_rot> <back_rot>
 
-  front_page    1-based PDF page of the check FRONT (back assumed at front+1)
-  check_number  digits; used for numeric sort within each paydate
-  paydate       YYYYMMDD or YYYY-MM-DD
+  front_page / back_page   1-based PDF pages of the check front and back.
+                           Short form assumes back_page = front_page + 1 and
+                           no rotation. If a check was fed face-up, its front
+                           is the SECOND page of the duplex pair — use the
+                           long form to swap.
+  check_number             digits; numeric sort key within each paydate
+  paydate                  YYYYMMDD or YYYY-MM-DD
+  front_rot / back_rot     0, 90, 180, or 270 — clockwise rotation applied so
+                           the page renders upright (180 for checks fed
+                           bottom-edge first; both pages of a pair normally
+                           need the same rotation)
 
-Lines starting with # and blank lines are ignored. Load order of the original
-stack does not matter — sorting comes from the manifest.
+Lines starting with # and blank lines are ignored. Load order, orientation,
+and side of the original stack do not matter — the manifest fixes all of it.
 
 For each distinct paydate, writes <outdir>/checksYYYYMMDD.pdf with the checks
 in check-number order (front, back, front, back...). If a target already
@@ -61,29 +74,38 @@ command -v qpdf >/dev/null 2>&1 || { echo "checks-split: qpdf not found" >&2; ex
 
 npages=$(qpdf --show-npages "$pdf")
 
-# Validate every manifest line before writing anything.
-clean=$(mktemp -t checks-split)
-trap 'rm -f "$clean"' EXIT
+bad() { echo "checks-split: manifest line $1: $2" >&2; exit 65; }
+
+valid_page() { [[ "$1" =~ ^[0-9]+$ ]] && (( $1 >= 1 && $1 <= npages )); }
+valid_rot() { [[ "$1" == 0 || "$1" == 90 || "$1" == 180 || "$1" == 270 ]]; }
+
+# Validate every line and normalize to the 6-field form before writing anything.
+workdir=$(mktemp -d -t checks-split)
+trap 'rm -rf "$workdir"' EXIT
+clean="$workdir/clean"
+: > "$clean"
 lineno=0
 while IFS= read -r line || [[ -n "$line" ]]; do
   lineno=$((lineno + 1))
   [[ "$line" =~ ^[[:space:]]*(#|$) ]] && continue
   # shellcheck disable=SC2086
   set -- $line
-  if [[ $# -ne 3 ]]; then
-    echo "checks-split: manifest line $lineno: expected 3 fields, got $#: $line" >&2; exit 65
+  if [[ $# -eq 3 ]]; then
+    front="$1"; back=$(( $1 + 1 )); checknum="$2"; date="$3"; frot=0; brot=0
+  elif [[ $# -eq 6 ]]; then
+    front="$1"; back="$2"; checknum="$3"; date="$4"; frot="$5"; brot="$6"
+  else
+    bad "$lineno" "expected 3 or 6 fields, got $#: $line"
   fi
-  front="$1"; checknum="$2"; date="${3//-/}"
-  if [[ ! "$front" =~ ^[0-9]+$ ]] || (( front < 1 )) || (( front + 1 > npages )); then
-    echo "checks-split: manifest line $lineno: bad front page '$front' (PDF has $npages pages)" >&2; exit 65
-  fi
-  if [[ ! "$checknum" =~ ^[0-9]+$ ]]; then
-    echo "checks-split: manifest line $lineno: bad check number '$checknum'" >&2; exit 65
-  fi
-  if [[ ! "$date" =~ ^[0-9]{8}$ ]]; then
-    echo "checks-split: manifest line $lineno: bad paydate '$3' — use YYYYMMDD or YYYY-MM-DD" >&2; exit 65
-  fi
-  echo "$front $checknum $date" >> "$clean"
+  rawdate="$date"; date="${date//-/}"
+  valid_page "$front" || bad "$lineno" "bad front page '$front' (PDF has $npages pages)"
+  valid_page "$back" || bad "$lineno" "bad back page '$back' (PDF has $npages pages)"
+  [[ "$front" != "$back" ]] || bad "$lineno" "front and back are the same page"
+  [[ "$checknum" =~ ^[0-9]+$ ]] || bad "$lineno" "bad check number '$checknum'"
+  [[ "$date" =~ ^[0-9]{8}$ ]] || bad "$lineno" "bad paydate '$rawdate' — use YYYYMMDD or YYYY-MM-DD"
+  valid_rot "$frot" || bad "$lineno" "bad front rotation '$frot' (0/90/180/270)"
+  valid_rot "$brot" || bad "$lineno" "bad back rotation '$brot' (0/90/180/270)"
+  echo "$front $back $checknum $date $frot $brot" >> "$clean"
 done < "$manifest"
 
 [[ -s "$clean" ]] || { echo "checks-split: manifest has no check lines" >&2; exit 65; }
@@ -91,19 +113,40 @@ done < "$manifest"
 mkdir -p "$outdir"
 
 while read -r date; do
-  # Page ranges in check-number order: "f1-b1,f2-b2,..."
-  ranges=$(awk -v d="$date" '$3 == d' "$clean" | sort -k2,2n \
-    | awk '{printf "%s%d-%d", sep, $1, $1 + 1; sep = ","}')
-  count=$(awk -v d="$date" '$3 == d' "$clean" | wc -l | tr -d ' ')
+  group="$workdir/group"
+  awk -v d="$date" '$4 == d' "$clean" | sort -k3,3n > "$group"
+  count=$(wc -l < "$group" | tr -d ' ')
+
+  # Page selection in check-number order: "front,back,front,back,..."
+  ranges=$(awk '{printf "%s%d,%d", sep, $1, $2; sep = ","}' "$group")
+  asm="$workdir/asm-$date.pdf"
+  qpdf --empty --pages "$pdf" "$ranges" -- "$asm"
+
+  # Apply rotations by output position: check i sits at pages 2i-1 (front), 2i (back).
+  p90=""; p180=""; p270=""
+  i=0
+  while read -r _ _ _ _ frot brot; do
+    i=$((i + 1))
+    case "$frot" in 90) p90="$p90,$((2*i-1))";; 180) p180="$p180,$((2*i-1))";; 270) p270="$p270,$((2*i-1))";; esac
+    case "$brot" in 90) p90="$p90,$((2*i))";; 180) p180="$p180,$((2*i))";; 270) p270="$p270,$((2*i))";; esac
+  done < "$group"
+  rotargs=()
+  [[ -n "$p90" ]] && rotargs+=("--rotate=+90:${p90#,}")
+  [[ -n "$p180" ]] && rotargs+=("--rotate=+180:${p180#,}")
+  [[ -n "$p270" ]] && rotargs+=("--rotate=+270:${p270#,}")
+  if [[ ${#rotargs[@]} -gt 0 ]]; then
+    qpdf "$asm" "$workdir/rot-$date.pdf" ${rotargs[@]+"${rotargs[@]}"}
+    asm="$workdir/rot-$date.pdf"
+  fi
+
   target="$outdir/checks$date.pdf"
-  tmppdf="$outdir/.checks$date.tmp.pdf"
   if [[ -e "$target" ]]; then
-    qpdf --empty --pages "$target" 1-z "$pdf" "$ranges" -- "$tmppdf"
-    mv "$tmppdf" "$target"
+    qpdf --empty --pages "$target" 1-z "$asm" 1-z -- "$workdir/merged-$date.pdf"
+    mv "$workdir/merged-$date.pdf" "$target"
     total=$(qpdf --show-npages "$target")
     echo "checks$date.pdf: appended $count check(s) — now $((total / 2)) check(s) ($total pages)"
   else
-    qpdf --empty --pages "$pdf" "$ranges" -- "$target"
+    mv "$asm" "$target"
     echo "checks$date.pdf: $count check(s) ($((count * 2)) pages)"
   fi
-done < <(awk '{print $3}' "$clean" | sort -u)
+done < <(awk '{print $4}' "$clean" | sort -u)

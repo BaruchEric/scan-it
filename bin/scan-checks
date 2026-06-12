@@ -23,8 +23,9 @@ Paydate: YYYYMMDD or YYYY-MM-DD (default: today).
 
 Options:
   -o, --outdir DIR   output directory (default: $default_outdir)
-      --staging      mixed paydates / unsorted stack: scan to a staging PDF
-                     (no paydate naming) for later splitting with checks-split
+      --staging      mixed paydates, unsorted, any orientation or side: scan
+                     to a staging PDF (no paydate naming) for later splitting
+                     and normalizing with checks-split
       --replace      overwrite an existing PDF for this paydate
                      (default: append the new checks to it)
       --open         open the finished PDF in Preview

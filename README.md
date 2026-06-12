@@ -41,15 +41,25 @@ becomes two consecutive PDF pages (front, then back).
 **Mixed paydates / unsorted stack** (the usual case — Claude drives this):
 
 ```sh
-scan-checks --staging                      # any order, no paydate needed
-# ...Claude reads check numbers + dates off the scanned fronts, writes a manifest:
-#    <front_page> <check_number> <YYYYMMDD>   (one line per check)
-checks-split <staging.pdf> <manifest>      # → checksYYYYMMDD.pdf per paydate
+scan-checks --staging                 # any order, orientation, or side — all fine
+# ...Claude reads each scanned pair (front vs back, check number, date,
+#    rotation) and writes a manifest, one line per check:
+#    <front_page> <back_page> <check_number> <YYYYMMDD> <front_rot> <back_rot>
+checks-split <staging.pdf> <manifest> # → checksYYYYMMDD.pdf per paydate
+checks-normalize checksYYYYMMDD.pdf   # crop + deskew + uniform landscape pages
 ```
 
 `checks-split` is deterministic qpdf assembly: groups by paydate, sorts by check
-number, validates the manifest before writing anything, and appends when a
-paydate PDF already exists.
+number, swaps pairs scanned back-side-first, applies per-page rotation
+(0/90/180/270) so every check renders uniformly (front upright, then back),
+validates the manifest before writing anything, and appends when a paydate PDF
+already exists. A 3-field short form `<front_page> <check_number> <YYYYMMDD>`
+covers clean stacks (back = front+1, no rotation).
+
+`checks-normalize` then makes every page uniform: renders at 300 dpi, trims the
+scanner background, deskews, and rotates portrait backs to landscape (bank-image
+convention — endorsement strip along the left edge), rebuilding the PDF in
+place. Safe to re-run; run it again after appending more checks to a paydate.
 
 **Single known paydate, pre-sorted stack:**
 
@@ -109,6 +119,7 @@ Deeper recovery steps: [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
 bin/scan2pdf            one-command ADF → dated PDF
 bin/scan-checks         paycheck scanning → checksYYYYMMDD.pdf (or --staging for mixed stacks)
 bin/checks-split        manifest-driven split: per-paydate PDFs sorted by check number
+bin/checks-normalize    crop/deskew/uniform-landscape pass over a check PDF
 bin/scan-diag           diagnostics with pass/fail summary
 docs/device-options.txt full `scanimage -A` option dump for the iX500
 ENVIRONMENT.md          machine/scanner state recorded at install time
