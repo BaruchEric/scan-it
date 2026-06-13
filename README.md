@@ -82,11 +82,21 @@ invoices/       invoice-2026-06-01-acme-corp$1200.00.pdf  + .json sidecar
 contracts/      contract-2026-05-15-lease-renewal.pdf     + .json sidecar
 statements/     statement-2026-06-01-chase-checking.pdf   + .json sidecar
 letters/        letter-2026-06-10-irs-notice.pdf          + .json sidecar
+taxes/          tax-2026-04-15-1099-misc.pdf              + .json sidecar
 misc/           misc-2026-06-11-unknown.pdf               + .json sidecar
 paychecks/      checks20260605.pdf  (via checks-split, per-check normalized)
 review/         items Claude could not classify with confidence
+entities.json   entity registry (personal + each business LLC)
 index.jsonl     one line per filed document (all types)
 ```
+
+**Entities.** Documents can be attributed to an entity — personal vs. a specific
+business (LLC). The registry lives at `~/Documents/Scans/entities.json` (slugs +
+display names); a manifest document may carry an optional `"entity": "<slug>"`,
+which `batch-file` validates against the registry and uses to file into a
+per-entity subfolder, e.g. `taxes/rio-laundromat/`, `receipts/personal/`. The
+entity is recorded in the sidecar and `index.jsonl`. Documents without an entity
+file at the type-folder root as before; paychecks ignore entity.
 
 Each `.json` sidecar contains the full OCR text, extracted fields (date, vendor, amount, etc.), and provenance (source scan, batch ID). Searchable text layers are embedded in the PDFs when `ocrmypdf` is installed (`brew install ocrmypdf` — optional; filing works without it). Paychecks are handed off to `checks-split` — which normalizes each check individually — and land in `paychecks/` exactly as the dedicated paycheck flow.
 

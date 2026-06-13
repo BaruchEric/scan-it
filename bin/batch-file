@@ -95,11 +95,28 @@ jq -e '([.documents[].pages[].rotate] + [(.review // [])[].pages[].rotate])
 
 # Rule 3: known types; safe slug names on every non-paycheck document.
 jq -e '.documents
-       | all(.type | IN("receipt","invoice","paycheck","contract","statement","letter","misc"))' \
+       | all(.type | IN("receipt","invoice","paycheck","contract","statement","letter","misc","tax"))' \
   "$manifest" >/dev/null || fail "unknown document type"
 jq -e '[.documents[] | select(.type != "paycheck")]
        | all(.name | type == "string" and test("^[a-z0-9][a-z0-9.$-]*$"))' \
   "$manifest" >/dev/null || fail "bad or missing document name (lowercase slug required)"
+
+# Rule 3b: entity — optional per document; lowercase slug, and when a registry
+# exists at <outdir>/entities.json the slug must be listed in it.
+jq -e '[.documents[] | select(has("entity"))]
+       | all(.entity | type == "string" and test("^[a-z0-9][a-z0-9-]*$"))' \
+  "$manifest" >/dev/null || fail "bad entity (lowercase slug required)"
+entities_file="$outdir/entities.json"
+if [[ -f "$entities_file" ]]; then
+  jq -e '.entities | type == "array" and length > 0 and all(.slug | type == "string")' \
+    "$entities_file" >/dev/null 2>&1 \
+    || fail "entities.json is invalid (expected {\"entities\": [{\"slug\": ...}]})"
+  unknown=$(jq -r --slurpfile reg "$entities_file" '
+    [$reg[0].entities[].slug] as $known
+    | [.documents[] | select(has("entity")) | .entity | select(IN($known[]) | not)]
+    | unique | join(", ")' "$manifest")
+  [[ -z "$unknown" ]] || fail "unknown entity: $unknown (not in $entities_file)"
+fi
 
 # Rules 4+5: paychecks carry check_number + YYYYMMDD paydate, exactly front+back.
 jq -e '[.documents[] | select(.type == "paycheck")]
@@ -147,6 +164,7 @@ folder_for() {
     statement) echo statements ;;
     letter) echo letters ;;
     misc) echo misc ;;
+    tax) echo taxes ;;
   esac
 }
 
@@ -181,12 +199,14 @@ now() { date +%Y-%m-%dT%H:%M:%S%z; }
 filed_count=0
 
 file_document() { # <doc-json>
-  local doc="$1" type folder name pdf rel
+  local doc="$1" type folder name entity dest pdf rel
   type=$(jq -r '.type' <<<"$doc")
   folder=$(folder_for "$type")
+  entity=$(jq -r '.entity // ""' <<<"$doc")
+  dest="$folder${entity:+/$entity}"
   name=$(jq -r '.name' <<<"$doc")
-  mkdir -p "$outdir/$folder"
-  pdf=$(unique_target "$outdir/$folder" "$name")
+  mkdir -p "$outdir/$dest"
+  pdf=$(unique_target "$outdir/$dest" "$name")
   if ! build_pdf "$doc" "$pdf"; then
     rm -f "$pdf"
     echo "batch-file: assembly failed for $name" >&2
@@ -194,14 +214,15 @@ file_document() { # <doc-json>
   fi
   add_text_layer "$pdf"
   jq -n --argjson doc "$doc" --arg batch "$batch_id" --arg scanned "$scanned_at" \
-    '{type: $doc.type, name: $doc.name, fields: ($doc.fields // {}),
+    '{type: $doc.type, name: $doc.name, entity: ($doc.entity // null),
+      fields: ($doc.fields // {}),
       text: ($doc.text // []), confidence: ($doc.confidence // "high"),
       source: {batch: $batch, pages: [$doc.pages[].file], scanned: $scanned}}' \
     > "${pdf%.pdf}.json"
-  rel="$folder/$(basename "$pdf")"
+  rel="$dest/$(basename "$pdf")"
   jq -nc --arg file "$rel" --argjson doc "$doc" --arg batch "$batch_id" --arg filed "$(now)" \
-    '{file: $file, type: $doc.type, fields: ($doc.fields // {}),
-      batch: $batch, filed: $filed}' >> "$outdir/index.jsonl"
+    '{file: $file, type: $doc.type, entity: ($doc.entity // null),
+      fields: ($doc.fields // {}), batch: $batch, filed: $filed}' >> "$outdir/index.jsonl"
   filed_count=$((filed_count + 1))
   echo "  $rel"
 }

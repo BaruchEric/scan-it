@@ -386,6 +386,130 @@ EOF
   ! grep -q "$OUT/paychecks/checks20260605.pdf" "$NORMALIZE_LOG"
 }
 
+entities_registry() {
+  mkdir -p "$OUT"
+  cat > "$OUT/entities.json" <<'EOF'
+{
+  "entities": [
+    { "slug": "personal",       "name": "Personal",           "kind": "personal" },
+    { "slug": "rio-laundromat", "name": "RIO LAUNDROMAT LLC", "kind": "business" }
+  ]
+}
+EOF
+}
+
+entity_manifest() { # one receipt assigned to rio-laundromat
+  cat > "$STAGING/manifest.json" <<'EOF'
+{
+  "batch": "batch-20260611-120000",
+  "documents": [
+    { "type": "receipt", "name": "receipt-2026-06-08-home-depot-45.23",
+      "entity": "rio-laundromat",
+      "pages": [ { "file": "pages/page-001.jpg", "rotate": 0 } ],
+      "fields": { "vendor": "Home Depot", "date": "2026-06-08", "total": 45.23 } }
+  ]
+}
+EOF
+}
+
+@test "entity files into a per-entity subfolder; sidecar + index carry it" {
+  page page-001.jpg RECEIPT
+  entities_registry
+  entity_manifest
+  run "$BATCH_FILE" -o "$OUT" --no-text-layer "$STAGING"
+  [ "$status" -eq 0 ]
+  pdf="$OUT/receipts/rio-laundromat/receipt-2026-06-08-home-depot-45.23.pdf"
+  [ -f "$pdf" ]
+  [ "$(jq -r '.entity' "${pdf%.pdf}.json")" = "rio-laundromat" ]
+  [ "$(jq -r '.entity' "$OUT/index.jsonl")" = "rio-laundromat" ]
+  [ "$(jq -r '.file' "$OUT/index.jsonl")" = "receipts/rio-laundromat/receipt-2026-06-08-home-depot-45.23.pdf" ]
+}
+
+@test "document without entity still files at the type-folder root" {
+  page page-001.jpg RECEIPT
+  page page-002.jpg BLANK
+  entities_registry
+  receipt_manifest
+  run "$BATCH_FILE" -o "$OUT" --no-text-layer "$STAGING"
+  [ "$status" -eq 0 ]
+  [ -f "$OUT/receipts/receipt-2026-06-08-home-depot-45.23.pdf" ]
+  [ "$(jq -r '.entity' "$OUT/index.jsonl")" = "null" ]
+}
+
+@test "unknown entity: exit 1, nothing written" {
+  page page-001.jpg RECEIPT
+  entities_registry
+  cat > "$STAGING/manifest.json" <<'EOF'
+{
+  "batch": "batch-20260611-120000",
+  "documents": [
+    { "type": "receipt", "name": "receipt-2026-06-08-x",
+      "entity": "rio-cycle-typo",
+      "pages": [ { "file": "pages/page-001.jpg", "rotate": 0 } ] }
+  ]
+}
+EOF
+  run "$BATCH_FILE" -o "$OUT" --no-text-layer "$STAGING"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"unknown entity: rio-cycle-typo"* ]]
+  [ ! -d "$OUT/receipts" ]
+  [ ! -e "$OUT/index.jsonl" ]
+}
+
+@test "bad entity slug (uppercase): exit 1, even without a registry" {
+  page page-001.jpg RECEIPT
+  cat > "$STAGING/manifest.json" <<'EOF'
+{
+  "batch": "batch-20260611-120000",
+  "documents": [
+    { "type": "receipt", "name": "receipt-2026-06-08-x",
+      "entity": "RIO LAUNDROMAT LLC",
+      "pages": [ { "file": "pages/page-001.jpg", "rotate": 0 } ] }
+  ]
+}
+EOF
+  run "$BATCH_FILE" -o "$OUT" --no-text-layer "$STAGING"
+  [ "$status" -eq 1 ]
+  [ ! -d "$OUT" ]
+}
+
+@test "entity accepted without a registry (slug check only)" {
+  page page-001.jpg RECEIPT
+  cat > "$STAGING/manifest.json" <<'EOF'
+{
+  "batch": "batch-20260611-120000",
+  "documents": [
+    { "type": "receipt", "name": "receipt-2026-06-08-x",
+      "entity": "acme",
+      "pages": [ { "file": "pages/page-001.jpg", "rotate": 0 } ] }
+  ]
+}
+EOF
+  run "$BATCH_FILE" -o "$OUT" --no-text-layer "$STAGING"
+  [ "$status" -eq 0 ]
+  [ -f "$OUT/receipts/acme/receipt-2026-06-08-x.pdf" ]
+}
+
+@test "tax type files into taxes/" {
+  page page-001.jpg TAX
+  entities_registry
+  cat > "$STAGING/manifest.json" <<'EOF'
+{
+  "batch": "batch-20260611-120000",
+  "documents": [
+    { "type": "tax", "name": "tax-2026-04-15-1099-misc",
+      "entity": "personal",
+      "pages": [ { "file": "pages/page-001.jpg", "rotate": 0 } ],
+      "fields": { "party": "IRS", "date": "2026-04-15", "title": "1099-MISC" } }
+  ]
+}
+EOF
+  run "$BATCH_FILE" -o "$OUT" --no-text-layer "$STAGING"
+  [ "$status" -eq 0 ]
+  [ -f "$OUT/taxes/personal/tax-2026-04-15-1099-misc.pdf" ]
+  [ "$(jq -r '.type' "$OUT/index.jsonl")" = "tax" ]
+}
+
 @test "missing ocrmypdf: prints skip notice, still succeeds" {
   page page-001.jpg RECEIPT
   page page-002.jpg BLANK
