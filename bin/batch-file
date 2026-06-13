@@ -98,7 +98,7 @@ jq -e '.documents
        | all(.type | IN("receipt","invoice","paycheck","contract","statement","letter","misc","tax"))' \
   "$manifest" >/dev/null || fail "unknown document type"
 jq -e '[.documents[] | select(.type != "paycheck")]
-       | all(.name | type == "string" and test("^[a-z0-9][a-z0-9.$-]*$"))' \
+       | all(.name | type == "string" and test("^[a-z0-9][a-z0-9.$,-]*$"))' \
   "$manifest" >/dev/null || fail "bad or missing document name (lowercase slug required)"
 
 # Rule 3b: entity — optional per document; lowercase slug, and when a registry

@@ -79,7 +79,7 @@ EOF
 {
   "batch": "batch-20260611-120000",
   "documents": [
-    { "type": "invoice", "name": "invoice-2026-05-31-coned-1042.50",
+    { "type": "invoice", "name": "invoice-2026-05-31-coned$1,042.50",
       "pages": [ { "file": "pages/page-001.jpg", "rotate": 0 },
                  { "file": "pages/page-003.jpg", "rotate": 0 } ],
       "fields": { "vendor": "ConEd", "invoice_number": "9912", "amount": 1042.50 } }
@@ -90,7 +90,7 @@ EOF
 EOF
   run "$BATCH_FILE" -o "$OUT" --no-text-layer "$STAGING"
   [ "$status" -eq 0 ]
-  [ "$(qpdf --show-npages "$OUT/invoices/invoice-2026-05-31-coned-1042.50.pdf")" = "2" ]
+  [ "$(qpdf --show-npages "$OUT/invoices/invoice-2026-05-31-coned\$1,042.50.pdf")" = "2" ]
 }
 
 @test "name collision gets a -2 suffix, never overwrites" {
