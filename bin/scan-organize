@@ -1,0 +1,113 @@
+#!/usr/bin/env python3
+"""scan-organize — split a scanned batch PDF into organized per-document PDFs.
+
+Takes a plan JSON (written by Claude after visually classifying the pages)
+and assembles the output PDFs with poppler's pdfseparate/pdfunite. Stdlib
+only; no pip packages needed.
+
+Usage: scan-organize plan.json [--force] [--dry-run]
+
+Plan JSON:
+{
+  "source": "~/Documents/Scans/document-20260716-141223.pdf",
+  "outdir": "~/Documents/Scans",          // optional, default shown
+  "outputs": [
+    {"path": "Checks/checks-20260716-2402-2421.pdf", "pages": [5, 6, 9]},
+    {"path": "Statements/statement-merchant-billing-2026-05.pdf", "pages": [1, 3]}
+  ],
+  "move_original": true                    // optional, default true:
+}                                          // mv source -> <outdir>/originals/
+
+Pages are 1-based, in the order they should appear in the output. Pages
+listed in no output are dropped (reported, so nothing vanishes silently).
+Exit codes: 0 ok, 1 bad plan/missing tools, 2 assembly failure.
+"""
+import json, os, shutil, subprocess, sys, tempfile
+
+def die(msg, code=1):
+    print(f"scan-organize: {msg}", file=sys.stderr)
+    sys.exit(code)
+
+def main():
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    force = "--force" in sys.argv
+    dry = "--dry-run" in sys.argv
+    if len(args) != 1:
+        die("usage: scan-organize plan.json [--force] [--dry-run]")
+
+    for tool in ("pdfseparate", "pdfunite", "pdfinfo"):
+        if not shutil.which(tool):
+            die(f"'{tool}' not found — install with: brew install poppler")
+
+    with open(os.path.expanduser(args[0])) as f:
+        plan = json.load(f)
+
+    src = os.path.expanduser(plan["source"])
+    outdir = os.path.expanduser(plan.get("outdir", "~/Documents/Scans"))
+    outputs = plan.get("outputs") or die("plan has no outputs")
+    if not os.path.isfile(src):
+        die(f"source not found: {src}")
+
+    # How many pages does the source really have?
+    info = subprocess.run(["pdfinfo", src], capture_output=True, text=True)
+    npages = next((int(l.split()[-1]) for l in info.stdout.splitlines()
+                   if l.startswith("Pages:")), None)
+    if not npages:
+        die(f"could not read page count of {src}")
+
+    # Validate the plan before touching anything.
+    used = set()
+    for out in outputs:
+        pages = out.get("pages")
+        if not pages:
+            die(f"output {out.get('path')} has no pages")
+        bad = [p for p in pages if not (isinstance(p, int) and 1 <= p <= npages)]
+        if bad:
+            die(f"output {out['path']}: pages out of range 1..{npages}: {bad}")
+        dest = os.path.join(outdir, out["path"])
+        if os.path.exists(dest) and not force:
+            die(f"refusing to overwrite {dest} (use --force)")
+        used.update(pages)
+    dropped = sorted(set(range(1, npages + 1)) - used)
+
+    if dry:
+        for out in outputs:
+            print(f"would write {out['path']}  <- pages {out['pages']}")
+        if dropped:
+            print(f"would drop pages: {dropped}")
+        return
+
+    tmp = tempfile.mkdtemp(prefix="scan-organize.")
+    try:
+        subprocess.run(["pdfseparate", src, os.path.join(tmp, "p-%d.pdf")],
+                       check=True, capture_output=True)
+        for out in outputs:
+            dest = os.path.join(outdir, out["path"])
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            parts = [os.path.join(tmp, f"p-{p}.pdf") for p in out["pages"]]
+            if len(parts) == 1:
+                shutil.copyfile(parts[0], dest)
+            else:
+                subprocess.run(["pdfunite", *parts, dest],
+                               check=True, capture_output=True)
+            print(f"wrote {dest}  ({len(parts)} page(s))")
+    except subprocess.CalledProcessError as e:
+        die(f"assembly failed: {e.stderr.decode(errors='replace')[:400]}", 2)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+    if dropped:
+        print(f"dropped pages (in no output): {dropped}")
+
+    if plan.get("move_original", True):
+        orig_dir = os.path.join(outdir, "originals")
+        os.makedirs(orig_dir, exist_ok=True)
+        dest = os.path.join(orig_dir, os.path.basename(src))
+        if os.path.exists(dest):
+            print(f"note: {dest} already exists — original left in place")
+        else:
+            shutil.move(src, dest)
+            print(f"original moved to {dest}")
+
+if __name__ == "__main__":
+    main()
