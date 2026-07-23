@@ -26,7 +26,7 @@ receipt_manifest() { # one receipt on page 1, blank back dropped
 {
   "batch": "batch-20260611-120000",
   "documents": [
-    { "type": "receipt", "name": "receipt-2026-06-08-home-depot-45.23",
+    { "type": "receipt", "name": "receipt-2026-06-08-home-depot $45.23",
       "pages": [ { "file": "pages/page-001.jpg", "rotate": 0 } ],
       "fields": { "vendor": "Home Depot", "date": "2026-06-08", "total": 45.23 },
       "text": [ "HOME DEPOT 45.23" ], "confidence": "high" }
@@ -42,15 +42,15 @@ EOF
   receipt_manifest
   run "$BATCH_FILE" -o "$OUT" --no-text-layer "$STAGING"
   [ "$status" -eq 0 ]
-  pdf="$OUT/receipts/receipt-2026-06-08-home-depot-45.23.pdf"
+  pdf="$OUT/receipts/receipt-2026-06-08-home-depot \$45.23.pdf"
   [ -f "$pdf" ]
   [ "$(qpdf --show-npages "$pdf")" = "1" ]
-  side="$OUT/receipts/receipt-2026-06-08-home-depot-45.23.json"
+  side="$OUT/receipts/receipt-2026-06-08-home-depot \$45.23.json"
   [ "$(jq -r '.fields.vendor' "$side")" = "Home Depot" ]
   [ "$(jq -r '.source.batch' "$side")" = "batch-20260611-120000" ]
   [ "$(jq -r '.text[0]' "$side")" = "HOME DEPOT 45.23" ]
   [ "$(wc -l < "$OUT/index.jsonl" | tr -d ' ')" = "1" ]
-  [ "$(jq -r '.file' "$OUT/index.jsonl")" = "receipts/receipt-2026-06-08-home-depot-45.23.pdf" ]
+  [ "$(jq -r '.file' "$OUT/index.jsonl")" = "receipts/receipt-2026-06-08-home-depot \$45.23.pdf" ]
 }
 
 @test "applies rotation so the page renders upright" {
@@ -79,7 +79,7 @@ EOF
 {
   "batch": "batch-20260611-120000",
   "documents": [
-    { "type": "invoice", "name": "invoice-2026-05-31-coned$1,042.50",
+    { "type": "invoice", "name": "invoice-2026-05-31-coned $1,042.50",
       "pages": [ { "file": "pages/page-001.jpg", "rotate": 0 },
                  { "file": "pages/page-003.jpg", "rotate": 0 } ],
       "fields": { "vendor": "ConEd", "invoice_number": "9912", "amount": 1042.50 } }
@@ -90,7 +90,7 @@ EOF
 EOF
   run "$BATCH_FILE" -o "$OUT" --no-text-layer "$STAGING"
   [ "$status" -eq 0 ]
-  [ "$(qpdf --show-npages "$OUT/invoices/invoice-2026-05-31-coned\$1,042.50.pdf")" = "2" ]
+  [ "$(qpdf --show-npages "$OUT/invoices/invoice-2026-05-31-coned \$1,042.50.pdf")" = "2" ]
 }
 
 @test "name collision gets a -2 suffix, never overwrites" {
@@ -98,12 +98,12 @@ EOF
   page page-002.jpg BLANK
   receipt_manifest
   mkdir -p "$OUT/receipts"
-  printf existing > "$OUT/receipts/receipt-2026-06-08-home-depot-45.23.pdf"
+  printf existing > "$OUT/receipts/receipt-2026-06-08-home-depot \$45.23.pdf"
   run "$BATCH_FILE" -o "$OUT" --no-text-layer --keep-staging "$STAGING"
   [ "$status" -eq 0 ]
-  [ "$(cat "$OUT/receipts/receipt-2026-06-08-home-depot-45.23.pdf")" = "existing" ]
-  [ -f "$OUT/receipts/receipt-2026-06-08-home-depot-45.23-2.pdf" ]
-  [ -f "$OUT/receipts/receipt-2026-06-08-home-depot-45.23-2.json" ]
+  [ "$(cat "$OUT/receipts/receipt-2026-06-08-home-depot \$45.23.pdf")" = "existing" ]
+  [ -f "$OUT/receipts/receipt-2026-06-08-home-depot \$45.23-2.pdf" ]
+  [ -f "$OUT/receipts/receipt-2026-06-08-home-depot \$45.23-2.json" ]
 }
 
 @test "unaccounted page: exit 1, nothing written" {
@@ -113,7 +113,7 @@ EOF
 {
   "batch": "batch-20260611-120000",
   "documents": [
-    { "type": "receipt", "name": "receipt-2026-06-08-x",
+    { "type": "receipt", "name": "receipt-2026-06-08-x $1.00",
       "pages": [ { "file": "pages/page-001.jpg", "rotate": 0 } ] }
   ]
 }
@@ -129,9 +129,9 @@ EOF
 {
   "batch": "batch-20260611-120000",
   "documents": [
-    { "type": "receipt", "name": "receipt-2026-06-08-a",
+    { "type": "receipt", "name": "receipt-2026-06-08-a $1.00",
       "pages": [ { "file": "pages/page-001.jpg", "rotate": 0 } ] },
-    { "type": "receipt", "name": "receipt-2026-06-08-b",
+    { "type": "receipt", "name": "receipt-2026-06-08-b $2.00",
       "pages": [ { "file": "pages/page-001.jpg", "rotate": 0 } ] }
   ]
 }
@@ -147,7 +147,7 @@ EOF
 {
   "batch": "batch-20260611-120000",
   "documents": [
-    { "type": "receipt", "name": "receipt-2026-06-08-x",
+    { "type": "receipt", "name": "receipt-2026-06-08-x $1.00",
       "pages": [ { "file": "pages/page-001.jpg", "rotate": 45 } ] }
   ]
 }
@@ -274,7 +274,7 @@ EOF
 {
   "batch": "../evil",
   "documents": [
-    { "type": "receipt", "name": "receipt-2026-06-08-x",
+    { "type": "receipt", "name": "receipt-2026-06-08-x $1.00",
       "pages": [ { "file": "pages/page-001.jpg", "rotate": 0 } ] }
   ]
 }
@@ -403,7 +403,7 @@ entity_manifest() { # one receipt assigned to rio-laundromat
 {
   "batch": "batch-20260611-120000",
   "documents": [
-    { "type": "receipt", "name": "receipt-2026-06-08-home-depot-45.23",
+    { "type": "receipt", "name": "receipt-2026-06-08-home-depot $45.23",
       "entity": "rio-laundromat",
       "pages": [ { "file": "pages/page-001.jpg", "rotate": 0 } ],
       "fields": { "vendor": "Home Depot", "date": "2026-06-08", "total": 45.23 } }
@@ -418,11 +418,11 @@ EOF
   entity_manifest
   run "$BATCH_FILE" -o "$OUT" --no-text-layer "$STAGING"
   [ "$status" -eq 0 ]
-  pdf="$OUT/receipts/rio-laundromat/receipt-2026-06-08-home-depot-45.23.pdf"
+  pdf="$OUT/receipts/rio-laundromat/receipt-2026-06-08-home-depot \$45.23.pdf"
   [ -f "$pdf" ]
   [ "$(jq -r '.entity' "${pdf%.pdf}.json")" = "rio-laundromat" ]
   [ "$(jq -r '.entity' "$OUT/index.jsonl")" = "rio-laundromat" ]
-  [ "$(jq -r '.file' "$OUT/index.jsonl")" = "receipts/rio-laundromat/receipt-2026-06-08-home-depot-45.23.pdf" ]
+  [ "$(jq -r '.file' "$OUT/index.jsonl")" = "receipts/rio-laundromat/receipt-2026-06-08-home-depot \$45.23.pdf" ]
 }
 
 @test "document without entity still files at the type-folder root" {
@@ -432,7 +432,7 @@ EOF
   receipt_manifest
   run "$BATCH_FILE" -o "$OUT" --no-text-layer "$STAGING"
   [ "$status" -eq 0 ]
-  [ -f "$OUT/receipts/receipt-2026-06-08-home-depot-45.23.pdf" ]
+  [ -f "$OUT/receipts/receipt-2026-06-08-home-depot \$45.23.pdf" ]
   [ "$(jq -r '.entity' "$OUT/index.jsonl")" = "null" ]
 }
 
@@ -443,7 +443,7 @@ EOF
 {
   "batch": "batch-20260611-120000",
   "documents": [
-    { "type": "receipt", "name": "receipt-2026-06-08-x",
+    { "type": "receipt", "name": "receipt-2026-06-08-x $1.00",
       "entity": "rio-cycle-typo",
       "pages": [ { "file": "pages/page-001.jpg", "rotate": 0 } ] }
   ]
@@ -462,7 +462,7 @@ EOF
 {
   "batch": "batch-20260611-120000",
   "documents": [
-    { "type": "receipt", "name": "receipt-2026-06-08-x",
+    { "type": "receipt", "name": "receipt-2026-06-08-x $1.00",
       "entity": "RIO LAUNDROMAT LLC",
       "pages": [ { "file": "pages/page-001.jpg", "rotate": 0 } ] }
   ]
@@ -479,7 +479,7 @@ EOF
 {
   "batch": "batch-20260611-120000",
   "documents": [
-    { "type": "receipt", "name": "receipt-2026-06-08-x",
+    { "type": "receipt", "name": "receipt-2026-06-08-x $1.00",
       "entity": "acme",
       "pages": [ { "file": "pages/page-001.jpg", "rotate": 0 } ] }
   ]
@@ -487,7 +487,7 @@ EOF
 EOF
   run "$BATCH_FILE" -o "$OUT" --no-text-layer "$STAGING"
   [ "$status" -eq 0 ]
-  [ -f "$OUT/receipts/acme/receipt-2026-06-08-x.pdf" ]
+  [ -f "$OUT/receipts/acme/receipt-2026-06-08-x \$1.00.pdf" ]
 }
 
 @test "tax type files into taxes/" {
@@ -521,5 +521,5 @@ EOF
   run env PATH="$TMP/toolbin:/usr/bin:/bin" "$BATCH_FILE" -o "$OUT" "$STAGING"
   [ "$status" -eq 0 ]
   [[ "$output" == *"skipping searchable text layers"* ]]
-  [ -f "$OUT/receipts/receipt-2026-06-08-home-depot-45.23.pdf" ]
+  [ -f "$OUT/receipts/receipt-2026-06-08-home-depot \$45.23.pdf" ]
 }
