@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
-# scan2pdf — scan a stack from the ScanSnap iX500 ADF to a dated, multi-page PDF.
+# scan2pdf — scan a stack from the ADF to a dated, multi-page PDF.
 #
-# Part of the ix500-scan project (~/Arik/dev/office/scan-it).
+# Supports the Brother ADS-4300N (via escl-scan) and the borrowed ScanSnap
+# iX500 (via SANE/scanimage); auto-detects whichever is connected.
+#
+# Part of the scan-it project (~/Arik/dev/office/scan-it).
 # Troubleshooting: run scan-diag, or see TROUBLESHOOTING.md in the project repo.
 set -euo pipefail
 
@@ -16,10 +19,12 @@ Options:
   -g, --gray           grayscale (default: color)
   -r, --resolution N   dpi (default: 300)
   -o, --outdir DIR     output directory (default: ~/Documents/Scans)
-  -p, --png            lossless PNG intermediates — PDFs ~20x bigger (default: JPEG)
+      --scanner WHICH  brother | ix500 | auto (default: auto — Brother first;
+                       env SCAN_SCANNER sets the default)
+  -p, --png            iX500 only: lossless PNG intermediates — PDFs ~20x bigger
   -k, --keep-pages     keep intermediate page images next to the PDF (default: delete)
-  -x, --scanopt ARG    pass an extra option through to scanimage (repeatable),
-                       e.g. -x --ald=yes -x --swdeskew=yes
+  -x, --scanopt ARG    iX500 only: pass an extra option through to scanimage
+                       (repeatable), e.g. -x --ald=yes -x --swdeskew=yes
       --open           open the finished PDF in Preview
   -h, --help           show this help
 
@@ -37,6 +42,7 @@ img_ext="jpg"
 keep_pages=0
 open_pdf=0
 name="scan"
+scanner="${SCAN_SCANNER:-auto}"
 scanopts=()
 
 while [[ $# -gt 0 ]]; do
@@ -54,6 +60,9 @@ while [[ $# -gt 0 ]]; do
     -x|--scanopt)
       [[ $# -ge 2 ]] || { echo "scan2pdf: $1 requires a value" >&2; exit 64; }
       scanopts+=("$2"); shift ;;
+    --scanner)
+      [[ $# -ge 2 ]] || { echo "scan2pdf: $1 requires a value" >&2; exit 64; }
+      scanner="$2"; shift ;;
     --open) open_pdf=1 ;;
     -h|--help) usage; exit 0 ;;
     -*) echo "scan2pdf: unknown option: $1" >&2; usage >&2; exit 64 ;;
@@ -62,37 +71,81 @@ while [[ $# -gt 0 ]]; do
   shift
 done
 
-for tool in scanimage img2pdf; do
-  if ! command -v "$tool" >/dev/null 2>&1; then
-    echo "scan2pdf: '$tool' not found — install with: brew install sane-backends img2pdf" >&2
-    exit 1
-  fi
-done
+case "$scanner" in
+  auto|brother|ix500) ;;
+  *) echo "scan2pdf: --scanner must be auto, brother, or ix500" >&2; exit 64 ;;
+esac
 
-# Auto-discover the iX500. scanimage -L prints:
-#   device `fujitsu:ScanSnap iX500:NNNN' is a FUJITSU ScanSnap iX500 scanner
-device=$(scanimage -L 2>/dev/null | grep -i fujitsu | head -1 \
-  | sed -e 's/^device `//' -e "s/' is a.*//" || true)
-if [[ -z "$device" ]]; then
-  echo "scan2pdf: no Fujitsu scanner found." >&2
-  echo "  Check the scanner lid is open (that powers it on) and USB is connected," >&2
-  echo "  then run scan-diag for a full checkup." >&2
+if ! command -v img2pdf >/dev/null 2>&1; then
+  echo "scan2pdf: 'img2pdf' not found — install with: brew install img2pdf" >&2
   exit 1
+fi
+
+script_dir=$(cd "$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")" && pwd)
+escl_scan="$script_dir/escl-scan"
+
+device_kind=""
+device=""
+if [[ "$scanner" != "ix500" && -x "$escl_scan" ]]; then
+  if device=$("$escl_scan" --discover 2>/dev/null); then
+    device_kind="escl"
+  fi
+fi
+if [[ -z "$device_kind" && "$scanner" != "brother" ]] \
+   && command -v scanimage >/dev/null 2>&1; then
+  # scanimage -L prints:
+  #   device `fujitsu:ScanSnap iX500:NNNN' is a FUJITSU ScanSnap iX500 scanner
+  device=$(scanimage -L 2>/dev/null | grep -i fujitsu | head -1 \
+    | sed -e 's/^device `//' -e "s/' is a.*//" || true)
+  [[ -n "$device" ]] && device_kind="fujitsu"
+fi
+if [[ -z "$device_kind" ]]; then
+  echo "scan2pdf: no scanner found (looked for: $scanner)." >&2
+  echo "  Brother: check power/USB and that the Push Scan Tool services run." >&2
+  echo "  iX500: check the lid is open (that powers it on) and USB is connected." >&2
+  echo "  Run scan-diag for a full checkup." >&2
+  exit 1
+fi
+
+if [[ "$device_kind" == "escl" ]]; then
+  if [[ "$img_format" != "jpeg" ]]; then
+    echo "scan2pdf: -p/--png is iX500-only (the Brother outputs JPEG);" >&2
+    echo "  rerun without -p, or with --scanner ix500." >&2
+    exit 64
+  fi
+  if [[ -n "${scanopts[*]:-}" ]]; then
+    echo "scan2pdf: -x/--scanopt passes scanimage options and is iX500-only." >&2
+    exit 64
+  fi
 fi
 
 tmpdir=$(mktemp -d -t scan2pdf)
 trap 'rm -rf "$tmpdir"' EXIT
 
 echo "Scanning from '$device' ($source_opt, $mode, ${resolution}dpi)..."
-# In --batch mode scanimage scans until the feeder is empty, then always ends
-# with "Document feeder out of documents" and a nonzero status — that is the
-# normal terminator, not an error. Page count is the real success signal.
-set +e
-scanimage -d "$device" --source "$source_opt" --mode "$mode" \
-  --resolution "$resolution" --format="$img_format" \
-  ${scanopts[@]+"${scanopts[@]}"} \
-  --batch="$tmpdir/page-%03d.$img_ext" --progress
-set -e
+if [[ "$device_kind" == "escl" ]]; then
+  escl_args=(-r "$resolution" -o "$tmpdir")
+  [[ "$source_opt" == "ADF Front" ]] && escl_args+=(-s)
+  [[ "$mode" == "Gray" ]] && escl_args+=(-g)
+  set +e
+  "$escl_scan" "${escl_args[@]}"
+  escl_rc=$?
+  set -e
+  if [[ $escl_rc -eq 1 ]]; then
+    echo "scan2pdf: scan failed — run scan-diag for a checkup." >&2
+    exit 1
+  fi
+else
+  # In --batch mode scanimage scans until the feeder is empty, then always ends
+  # with "Document feeder out of documents" and a nonzero status — that is the
+  # normal terminator, not an error. Page count is the real success signal.
+  set +e
+  scanimage -d "$device" --source "$source_opt" --mode "$mode" \
+    --resolution "$resolution" --format="$img_format" \
+    ${scanopts[@]+"${scanopts[@]}"} \
+    --batch="$tmpdir/page-%03d.$img_ext" --progress
+  set -e
+fi
 
 shopt -s nullglob
 pages=("$tmpdir"/page-*."$img_ext")

@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 # scan-batch — continuous duplex scan loop for mixed-document batches.
 #
-# Scans until the ADF empties, then watches the iX500's page-loaded sensor and
-# resumes the moment more paper lands. Pages accumulate as per-page JPEGs in a
-# staging dir for the batch workflow (Claude analysis -> batch-file).
+# Scans until the ADF empties, then watches the scanner's page-loaded sensor
+# and resumes the moment more paper lands. Pages accumulate as per-page JPEGs
+# in a staging dir for the batch workflow (Claude analysis -> batch-file).
+# Works with the Brother ADS-4300N (via escl-scan) and the borrowed ScanSnap
+# iX500 (via SANE/scanimage); auto-detects whichever is connected.
 #
-# Part of the ix500-scan project (~/Arik/dev/office/scan-it).
+# Part of the scan-it project (~/Arik/dev/office/scan-it).
 set -euo pipefail
 
 scanimage_bin="${SCAN_BATCH_SCANIMAGE:-scanimage}"
@@ -16,7 +18,7 @@ usage() {
   cat <<'EOF'
 Usage: scan-batch [options]
 
-Continuous batch scan from the iX500 ADF. Feed paper in any number of chunks;
+Continuous batch scan from the ADF. Feed paper in any number of chunks;
 scanning resumes automatically when the paper sensor sees a new stack.
 
 End the batch by pressing Enter, or after --idle seconds with no paper.
@@ -30,7 +32,10 @@ Options:
   -o, --outdir DIR     parent dir for batch staging dirs
                        (default: ~/Documents/Scans/.batches)
   --resume DIR         continue an interrupted batch staging dir
-  -x, --scanopt ARG    extra option passed through to scanimage (repeatable)
+      --scanner WHICH  brother | ix500 | auto (default: auto — Brother first;
+                       env SCAN_SCANNER sets the default)
+  -x, --scanopt ARG    iX500 only: extra option passed through to scanimage
+                       (repeatable)
   -h, --help           show this help
 
 Exit codes:
@@ -46,6 +51,7 @@ resolution=300
 idle=60
 outparent="$HOME/Documents/Scans/.batches"
 resume_dir=""
+scanner="${SCAN_SCANNER:-auto}"
 scanopts=()
 
 while [[ $# -gt 0 ]]; do
@@ -66,6 +72,9 @@ while [[ $# -gt 0 ]]; do
     --resume)
       [[ $# -ge 2 ]] || { echo "scan-batch: $1 requires a value" >&2; exit 64; }
       resume_dir="$2"; shift ;;
+    --scanner)
+      [[ $# -ge 2 ]] || { echo "scan-batch: $1 requires a value" >&2; exit 64; }
+      scanner="$2"; shift ;;
     -x|--scanopt)
       [[ $# -ge 2 ]] || { echo "scan-batch: $1 requires a value" >&2; exit 64; }
       scanopts+=("$2"); shift ;;
@@ -76,20 +85,54 @@ while [[ $# -gt 0 ]]; do
 done
 
 command -v jq >/dev/null 2>&1 || { echo "scan-batch: jq not found" >&2; exit 1; }
-command -v "$scanimage_bin" >/dev/null 2>&1 \
-  || { echo "scan-batch: '$scanimage_bin' not found" >&2; exit 1; }
 
-discover_device() {
+case "$scanner" in
+  auto|brother|ix500) ;;
+  *) echo "scan-batch: --scanner must be auto, brother, or ix500" >&2; exit 64 ;;
+esac
+
+script_dir=$(cd "$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")" && pwd)
+escl_bin="${SCAN_BATCH_ESCL:-$script_dir/escl-scan}"
+
+device_kind=""
+device=""
+
+discover_fujitsu() {
   "$scanimage_bin" -L 2>/dev/null | grep -i fujitsu | head -1 \
     | sed -e 's/^device `//' -e "s/' is a.*//" || true
 }
 
-device=$(discover_device)
-if [[ -z "$device" ]]; then
-  echo "scan-batch: no Fujitsu scanner found." >&2
-  echo "  Check the lid is open (that powers it on) and USB is connected," >&2
-  echo "  then run scan-diag for a full checkup." >&2
+# Sets device_kind + device to whatever is connected, honoring --scanner.
+discover_scanner() {
+  if [[ "$scanner" != "ix500" && -x "$escl_bin" ]]; then
+    if device=$("$escl_bin" --discover 2>/dev/null); then
+      device_kind="escl"
+      return 0
+    fi
+  fi
+  if [[ "$scanner" != "brother" ]] && command -v "$scanimage_bin" >/dev/null 2>&1; then
+    device=$(discover_fujitsu)
+    if [[ -n "$device" ]]; then
+      device_kind="fujitsu"
+      return 0
+    fi
+  fi
+  device_kind=""
+  device=""
+  return 1
+}
+
+if ! discover_scanner; then
+  echo "scan-batch: no scanner found (looked for: $scanner)." >&2
+  echo "  Brother: check power/USB and that the Push Scan Tool services run." >&2
+  echo "  iX500: check the lid is open (that powers it on) and USB is connected." >&2
+  echo "  Run scan-diag for a full checkup." >&2
   exit 1
+fi
+
+if [[ "$device_kind" == "escl" && -n "${scanopts[*]:-}" ]]; then
+  echo "scan-batch: -x/--scanopt passes scanimage options and is iX500-only." >&2
+  exit 64
 fi
 
 if [[ -n "$resume_dir" ]]; then
@@ -125,17 +168,20 @@ write_batch_json() {
 }
 
 page_loaded() {
-  "$scanimage_bin" -d "$device" -A 2>/dev/null \
-    | grep -- '--page-loaded' | grep -q '\[yes\]'
+  if [[ "$device_kind" == "escl" ]]; then
+    "$escl_bin" --page-loaded >/dev/null 2>&1
+  else
+    "$scanimage_bin" -d "$device" -A 2>/dev/null \
+      | grep -- '--page-loaded' | grep -q '\[yes\]'
+  fi
 }
 
 # The iX500 has documented USB flakiness: if it drops off the bus, retry
 # discovery with backoff, then bail preserving the staging dir.
 ensure_device() {
-  local tries=0 d
+  local tries=0
   while :; do
-    d=$(discover_device)
-    if [[ -n "$d" ]]; then device="$d"; return 0; fi
+    if discover_scanner; then return 0; fi
     tries=$((tries + 1))
     if (( tries >= 3 )); then
       write_batch_json
@@ -149,6 +195,17 @@ ensure_device() {
 
 scan_chunk() {
   local start=$(( $(page_count) + 1 ))
+  if [[ "$device_kind" == "escl" ]]; then
+    local escl_args=(-r "$resolution" -o "$staging/pages" --start "$start")
+    [[ "$source_opt" == "ADF Front" ]] && escl_args+=(-s)
+    [[ "$mode" == "Gray" ]] && escl_args+=(-g)
+    # Exit 2 (feeder emptied between the sensor poll and the scan) is normal
+    # here; the caller's page-count delta is the real success signal.
+    set +e
+    "$escl_bin" "${escl_args[@]}"
+    set -e
+    return 0
+  fi
   # In --batch mode scanimage always ends with "Document feeder out of
   # documents" and nonzero status — the normal terminator, not an error.
   set +e

@@ -1,0 +1,233 @@
+#!/usr/bin/env bash
+# escl-scan — minimal eSCL (AirScan) client for the Brother ADS-4300N.
+#
+# Drains the ADF into numbered JPEG page images, plus small probe modes the
+# other scan tools build on. Talks to the localhost eSCL bridge the Brother
+# Push Scan Tool publishes for USB; the same Bonjour discovery finds the
+# scanner's own eSCL server if it is ever connected over Ethernet instead.
+#
+# Part of the scan-it project (~/Arik/dev/office/scan-it).
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage: escl-scan [options] -o DIR    scan: drain the ADF to DIR/page-NNN.jpg
+       escl-scan --discover          print the scanner's eSCL endpoint URL
+       escl-scan --status            print scanner state and ADF state
+       escl-scan --page-loaded       exit 0 iff paper is in the feeder
+
+Options:
+  -s, --simplex        front side only (default: duplex)
+  -g, --gray           grayscale (default: color)
+  -r, --resolution N   dpi: 75|150|200|240|300|400|500|600 (default: 300)
+  -o, --outdir DIR     directory for page images (required to scan)
+      --start N        number the first page N (default: 1)
+      --endpoint URL   skip discovery, use this eSCL base URL
+  -h, --help           show this help
+
+Exit codes (scan mode):
+  0 success   1 no scanner / protocol error   2 feeder empty, no pages   64 usage
+EOF
+}
+
+duplex="true"
+color_mode="RGB24"
+resolution=300
+outdir=""
+start_num=1
+endpoint=""
+action="scan"
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -s|--simplex) duplex="false" ;;
+    -g|--gray) color_mode="Grayscale8" ;;
+    -r|--resolution)
+      [[ $# -ge 2 ]] || { echo "escl-scan: $1 requires a value" >&2; exit 64; }
+      resolution="$2"; shift ;;
+    -o|--outdir)
+      [[ $# -ge 2 ]] || { echo "escl-scan: $1 requires a value" >&2; exit 64; }
+      outdir="$2"; shift ;;
+    --start)
+      [[ $# -ge 2 && "$2" =~ ^[0-9]+$ ]] || { echo "escl-scan: --start requires an integer" >&2; exit 64; }
+      start_num="$2"; shift ;;
+    --endpoint)
+      [[ $# -ge 2 ]] || { echo "escl-scan: $1 requires a value" >&2; exit 64; }
+      endpoint="$2"; shift ;;
+    --discover) action="discover" ;;
+    --status) action="status" ;;
+    --page-loaded) action="page-loaded" ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "escl-scan: unknown argument: $1" >&2; usage >&2; exit 64 ;;
+  esac
+  shift
+done
+
+cache_file="${XDG_CACHE_HOME:-$HOME/.cache}/escl-scan-endpoint"
+
+endpoint_alive() {
+  curl -s --max-time 2 "$1/ScannerStatus" 2>/dev/null | grep -q '<pwg:State>'
+}
+
+# dns-sd never exits on its own; run it for a bounded window and collect output.
+bonjour() {  # bonjour <seconds> <dns-sd args...>
+  local secs="$1" pid; shift
+  dns-sd "$@" 2>/dev/null & pid=$!
+  sleep "$secs"
+  kill "$pid" 2>/dev/null || true
+  wait "$pid" 2>/dev/null || true
+}
+
+discover_endpoint() {
+  local ep inst out line host port rs instances ordered
+  if [[ -f "$cache_file" ]]; then
+    ep=$(<"$cache_file")
+    if [[ -n "$ep" ]] && endpoint_alive "$ep"; then printf '%s\n' "$ep"; return 0; fi
+  fi
+  instances=$(bonjour 2 -B _uscan._tcp local. \
+    | sed -n '/ Add /s/.*_uscan\._tcp\.[[:space:]]*//p' | awk '!seen[$0]++')
+  [[ -n "$instances" ]] || return 1
+  ordered=$( { grep -iE 'brother|ads' <<<"$instances" || true
+               grep -ivE 'brother|ads' <<<"$instances" || true; } )
+  while IFS= read -r inst; do
+    [[ -n "$inst" ]] || continue
+    out=$(bonjour 2 -L "$inst" _uscan._tcp local.)
+    line=$(grep ' can be reached at ' <<<"$out" | head -1) || continue
+    host=$(sed -E 's/.* can be reached at ([^ :]+):([0-9]+).*/\1/' <<<"$line")
+    port=$(sed -E 's/.* can be reached at ([^ :]+):([0-9]+).*/\2/' <<<"$line")
+    host="${host%.}"
+    rs=$(grep -oE '(^|[[:space:]])rs=[^ ]+' <<<"$out" | head -1 | sed 's/.*rs=//' || true)
+    rs="${rs#/}"; rs="${rs:-eSCL}"
+    ep="http://$host:$port/$rs"
+    if endpoint_alive "$ep"; then
+      mkdir -p "$(dirname "$cache_file")"
+      printf '%s\n' "$ep" > "$cache_file"
+      printf '%s\n' "$ep"
+      return 0
+    fi
+  done <<<"$ordered"
+  return 1
+}
+
+if [[ -z "$endpoint" ]]; then
+  if ! endpoint=$(discover_endpoint); then
+    echo "escl-scan: no eSCL scanner found." >&2
+    echo "  Check the Brother is powered on and its USB is connected, and that the" >&2
+    echo "  Brother Push Scan Tool services are running (run scan-diag)." >&2
+    exit 1
+  fi
+fi
+
+scanner_status() { curl -s --max-time 3 "$endpoint/ScannerStatus" 2>/dev/null; }
+
+case "$action" in
+  discover)
+    printf '%s\n' "$endpoint"
+    exit 0 ;;
+  status)
+    st=$(scanner_status || true)
+    state=$(grep -oE '<pwg:State>[^<]*' <<<"$st" | head -1 | cut -d'>' -f2 || true)
+    adf=$(grep -oE '<scan:AdfState>[^<]*' <<<"$st" | head -1 | cut -d'>' -f2 || true)
+    [[ -n "$state" ]] || { echo "escl-scan: scanner did not answer at $endpoint" >&2; exit 1; }
+    echo "State=$state Adf=${adf:-unknown} Endpoint=$endpoint"
+    exit 0 ;;
+  page-loaded)
+    if scanner_status | grep -q 'ScannerAdfLoaded'; then exit 0; else exit 1; fi ;;
+esac
+
+# ---- scan mode ----
+[[ -n "$outdir" ]] || { echo "escl-scan: -o DIR is required to scan" >&2; usage >&2; exit 64; }
+mkdir -p "$outdir"
+
+st=$(scanner_status || true)
+grep -q '<pwg:State>' <<<"$st" || { echo "escl-scan: scanner did not answer at $endpoint" >&2; exit 1; }
+if ! grep -q 'ScannerAdfLoaded' <<<"$st"; then
+  echo "escl-scan: feeder is empty — load a stack and retry." >&2
+  exit 2
+fi
+
+settings_file=$(mktemp -t escl-settings)
+part_file=""
+trap 'rm -f "$settings_file" ${part_file:+"$part_file"}' EXIT
+cat > "$settings_file" <<XML
+<?xml version="1.0" encoding="UTF-8"?>
+<scan:ScanSettings xmlns:scan="http://schemas.hp.com/imaging/escl/2011/05/03" xmlns:pwg="http://www.pwg.org/schemas/2010/12/sm">
+  <pwg:Version>2.63</pwg:Version>
+  <pwg:ScanRegions>
+    <pwg:ScanRegion>
+      <pwg:ContentRegionUnits>escl:ThreeHundredthsOfInches</pwg:ContentRegionUnits>
+      <pwg:Height>3300</pwg:Height>
+      <pwg:Width>2550</pwg:Width>
+      <pwg:XOffset>0</pwg:XOffset>
+      <pwg:YOffset>0</pwg:YOffset>
+    </pwg:ScanRegion>
+  </pwg:ScanRegions>
+  <pwg:InputSource>Feeder</pwg:InputSource>
+  <scan:ColorMode>$color_mode</scan:ColorMode>
+  <scan:XResolution>$resolution</scan:XResolution>
+  <scan:YResolution>$resolution</scan:YResolution>
+  <scan:DocumentFormatExt>image/jpeg</scan:DocumentFormatExt>
+  <scan:Duplex>$duplex</scan:Duplex>
+</scan:ScanSettings>
+XML
+
+resp=$(curl -s -i --max-time 15 -X POST -H 'Content-Type: text/xml' \
+  --data-binary @"$settings_file" "$endpoint/ScanJobs" || true)
+code=$(head -1 <<<"$resp" | grep -oE '[0-9]{3}' | head -1 || true)
+if [[ "$code" != "201" ]]; then
+  if [[ "$code" == "409" ]]; then
+    echo "escl-scan: scanner refused the job (busy, or the feeder emptied)." >&2
+  else
+    echo "escl-scan: creating the scan job failed (HTTP ${code:-none})." >&2
+  fi
+  exit 1
+fi
+job=$(grep -i '^location:' <<<"$resp" | tail -1 | awk '{print $2}' | tr -d '\r')
+[[ -n "$job" ]] || { echo "escl-scan: scanner did not return a job URL." >&2; exit 1; }
+case "$job" in
+  http://*|https://*) : ;;
+  /*) job="$(sed -E 's#^(https?://[^/]+).*#\1#' <<<"$endpoint")$job" ;;
+  *)  job="$endpoint/$job" ;;
+esac
+
+pages=0
+n=$start_num
+retries=0
+part_file="$outdir/.escl-part.$$"
+while :; do
+  code=$(curl -s -o "$part_file" -w '%{http_code}' --max-time 300 "$job/NextDocument" || echo 000)
+  case "$code" in
+    200)
+      mv "$part_file" "$(printf '%s/page-%03d.jpg' "$outdir" "$n")"
+      echo "Page $n received."
+      n=$((n + 1)); pages=$((pages + 1)); retries=0 ;;
+    404)
+      break ;;  # job complete: every page has been delivered
+    503|000)
+      # 503 = next page not ready yet; 000 = transient transport hiccup
+      retries=$((retries + 1))
+      if (( retries > 60 )); then
+        echo "escl-scan: gave up waiting for the next page (HTTP $code)." >&2
+        curl -s -o /dev/null -X DELETE "$job" 2>/dev/null || true
+        [[ $pages -gt 0 ]] && break
+        exit 1
+      fi
+      sleep 1 ;;
+    *)
+      echo "escl-scan: unexpected HTTP $code fetching a page." >&2
+      curl -s -o /dev/null -X DELETE "$job" 2>/dev/null || true
+      [[ $pages -gt 0 ]] && break
+      exit 1 ;;
+  esac
+done
+curl -s -o /dev/null -X DELETE "$job" 2>/dev/null || true
+
+if (( pages == 0 )); then
+  if scanner_status | grep -qi 'Jam'; then
+    echo "escl-scan: paper jam reported — clear the feeder and retry." >&2
+    exit 1
+  fi
+  echo "escl-scan: no pages received." >&2
+  exit 2
+fi
+echo "$pages page(s) -> $outdir"

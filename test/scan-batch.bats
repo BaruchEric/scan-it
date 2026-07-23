@@ -7,6 +7,9 @@ setup() {
   mkdir -p "$SCANIMAGE_STUB_DIR"
   export SCAN_BATCH_SCANIMAGE="$BATS_TEST_DIRNAME/stubs/scanimage"
   export SCAN_BATCH_POLL_SECS=1
+  # Pin to the stubbed iX500 path so a live Brother on the tester's desk is
+  # never touched.
+  export SCAN_SCANNER=ix500
   BATCHES="$TMP/batches"
   SCAN_BATCH="$BATS_TEST_DIRNAME/../bin/scan-batch"
   cat > "$SCANIMAGE_STUB_DIR/devices" <<'EOF'
@@ -21,7 +24,7 @@ teardown() { rm -rf "$TMP"; }
   rm "$SCANIMAGE_STUB_DIR/devices"
   run "$SCAN_BATCH" -o "$BATCHES" --idle 1
   [ "$status" -eq 1 ]
-  [[ "$output" == *"no Fujitsu scanner"* ]]
+  [[ "$output" == *"no scanner found"* ]]
 }
 
 @test "scans a single chunk and records batch.json" {

@@ -1,80 +1,140 @@
 #!/usr/bin/env bash
-# scan-diag — diagnostics for the ScanSnap iX500 + SANE scanning stack.
+# scan-diag — diagnostics for the scanning stack.
+#
+# Covers both scanners: the Brother ADS-4300N (eSCL via the Push Scan Tool's
+# localhost bridge) and the borrowed ScanSnap iX500 (SANE fujitsu backend).
+# A scanner that is not connected is skipped, not failed; the run fails only
+# when NO scanner is usable (or a shared tool is missing).
 #
 # Runs every check the stack depends on and prints a colored pass/fail summary
 # with a fix hint for each failure. Safe to run any time; changes nothing.
 set -uo pipefail
 
 if [[ -t 1 ]]; then
-  green=$'\033[32m' red=$'\033[31m' bold=$'\033[1m' reset=$'\033[0m'
+  green=$'\033[32m' red=$'\033[31m' yellow=$'\033[33m' bold=$'\033[1m' reset=$'\033[0m'
 else
-  green="" red="" bold="" reset=""
+  green="" red="" yellow="" bold="" reset=""
 fi
 
 pass=0
 fail=0
 
-ok()  { printf '%sPASS%s  %s\n' "$green" "$reset" "$1"; pass=$((pass+1)); }
-bad() { printf '%sFAIL%s  %s\n      hint: %s\n' "$red" "$reset" "$1" "$2"; fail=$((fail+1)); }
+ok()   { printf '%sPASS%s  %s\n' "$green" "$reset" "$1"; pass=$((pass+1)); }
+bad()  { printf '%sFAIL%s  %s\n      hint: %s\n' "$red" "$reset" "$1" "$2"; fail=$((fail+1)); }
+skip() { printf '%sSKIP%s  %s\n' "$yellow" "$reset" "$1"; }
 
-printf '%sscan-diag — ScanSnap iX500 scanning stack%s\n\n' "$bold" "$reset"
+script_dir=$(cd "$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")" && pwd)
+escl_scan="$script_dir/escl-scan"
 
-# 1. USB presence. NOTE: system_profiler SPUSBDataType returns empty output on
-# macOS 26 (observed 26.5.1), so we use ioreg instead.
-if ioreg -p IOUSB -l -w0 2>/dev/null | grep -qi "ScanSnap iX500"; then
-  ok "iX500 visible on USB (ioreg)"
-else
-  bad "iX500 visible on USB (ioreg)" \
-    "open the scanner lid (powers it on), reseat the USB cable, prefer a USB-2 port or powered hub"
-fi
+printf '%sscan-diag — scanning stack (Brother ADS-4300N / ScanSnap iX500)%s\n\n' "$bold" "$reset"
 
-# 2. Toolchain installed
-if command -v scanimage >/dev/null 2>&1; then
-  ok "sane-backends installed (scanimage)"
-else
-  bad "sane-backends installed (scanimage)" "brew install sane-backends"
-fi
-
+# ---- shared toolchain ----
 if command -v img2pdf >/dev/null 2>&1; then
   ok "img2pdf installed"
 else
   bad "img2pdf installed" "brew install img2pdf"
 fi
 
-# 3. Fujitsu/PFU software must not be running — it holds the USB device.
-fujitsu_procs=$(pgrep -fl -i "scansnap" 2>/dev/null || true)
-if [[ -z "$fujitsu_procs" ]]; then
-  ok "no Fujitsu/ScanSnap software running"
-else
-  bad "no Fujitsu/ScanSnap software running" \
-    "quit it: pkill -i scansnap — and see TROUBLESHOOTING.md about its LaunchAgents. Found: $fujitsu_procs"
+# ---- Brother ADS-4300N ----
+printf '\n%sBrother ADS-4300N%s\n' "$bold" "$reset"
+brother_fail_before=$fail
+
+brother_usb=0
+ioreg -p IOUSB -w0 2>/dev/null | grep -qi "ADS-4300N" && brother_usb=1
+
+brother_endpoint=""
+if [[ -x "$escl_scan" ]]; then
+  brother_endpoint=$("$escl_scan" --discover 2>/dev/null || true)
 fi
 
-# 4. Low-level SANE USB probe
-if command -v sane-find-scanner >/dev/null 2>&1; then
-  if sane-find-scanner -q 2>/dev/null | grep -q "0x132b"; then
-    ok "sane-find-scanner sees the iX500 (0x04c5/0x132b)"
+if [[ $brother_usb -eq 0 && -z "$brother_endpoint" ]]; then
+  skip "Brother not found (USB or Bonjour) — skipped; plug it in to check it"
+  brother_usable=0
+else
+  if [[ $brother_usb -eq 1 ]]; then
+    ok "ADS-4300N visible on USB (ioreg)"
   else
-    bad "sane-find-scanner sees the iX500 (0x04c5/0x132b)" \
-      "replug the scanner; make sure no ScanSnap software is holding it"
+    skip "ADS-4300N not on USB (reachable over the network instead)"
   fi
-else
-  bad "sane-find-scanner available" "brew install sane-backends"
+
+  # The Push Scan Tool's background services publish the eSCL-over-USB bridge.
+  if pgrep -q -f "Brother/Utilities/Server/USBserver" \
+     && pgrep -q -f "Brother/Utilities/Server/NETserver"; then
+    ok "Brother Push Scan Tool services running"
+  else
+    bad "Brother Push Scan Tool services running" \
+      "log out and back in (LaunchAgent com.brother.LOGINserver starts them), or reinstall BrotherPushScanTool"
+  fi
+
+  if [[ ! -x "$escl_scan" ]]; then
+    bad "escl-scan available" "expected next to scan-diag: $escl_scan"
+  elif [[ -n "$brother_endpoint" ]]; then
+    status_line=$("$escl_scan" --status 2>/dev/null || true)
+    if [[ "$status_line" == State=* ]]; then
+      ok "eSCL endpoint answering ($status_line)"
+    else
+      bad "eSCL endpoint answering" \
+        "endpoint found ($brother_endpoint) but ScannerStatus failed — replug USB, or check the Push Scan Tool services"
+    fi
+  else
+    bad "eSCL endpoint discovered (Bonjour _uscan._tcp)" \
+      "replug the scanner's USB and check the Push Scan Tool services, then retry"
+  fi
+  brother_usable=$(( fail == brother_fail_before ? 1 : 0 ))
 fi
 
-# 5. SANE backend enumeration (the check that matters most)
-if command -v scanimage >/dev/null 2>&1; then
-  if scanimage -L 2>/dev/null | grep -qi "fujitsu"; then
+# ---- ScanSnap iX500 ----
+printf '\n%sScanSnap iX500 (borrowed)%s\n' "$bold" "$reset"
+ix500_fail_before=$fail
+
+if ! ioreg -p IOUSB -l -w0 2>/dev/null | grep -qi "ScanSnap iX500"; then
+  skip "iX500 not on USB — skipped (lid closed, unplugged, or returned)"
+  ix500_usable=0
+else
+  ok "iX500 visible on USB (ioreg)"
+
+  if command -v scanimage >/dev/null 2>&1; then
+    ok "sane-backends installed (scanimage)"
+  else
+    bad "sane-backends installed (scanimage)" "brew install sane-backends"
+  fi
+
+  # Fujitsu/PFU software must not be running — it holds the USB device.
+  fujitsu_procs=$(pgrep -fl -i "scansnap" 2>/dev/null || true)
+  if [[ -z "$fujitsu_procs" ]]; then
+    ok "no Fujitsu/ScanSnap software running"
+  else
+    bad "no Fujitsu/ScanSnap software running" \
+      "quit it: pkill -i scansnap — and see TROUBLESHOOTING.md about its LaunchAgents. Found: $fujitsu_procs"
+  fi
+
+  if command -v sane-find-scanner >/dev/null 2>&1; then
+    if sane-find-scanner -q 2>/dev/null | grep -q "0x132b"; then
+      ok "sane-find-scanner sees the iX500 (0x04c5/0x132b)"
+    else
+      bad "sane-find-scanner sees the iX500 (0x04c5/0x132b)" \
+        "replug the scanner; make sure no ScanSnap software is holding it"
+    fi
+  else
+    bad "sane-find-scanner available" "brew install sane-backends"
+  fi
+
+  # SANE backend enumeration (the check that matters most)
+  if command -v scanimage >/dev/null 2>&1 && scanimage -L 2>/dev/null | grep -qi "fujitsu"; then
     ok "scanimage -L lists the fujitsu device"
   else
     bad "scanimage -L lists the fujitsu device" \
       "check 'fujitsu' is uncommented in \$(brew --prefix)/etc/sane.d/dll.conf; try 'sudo scanimage -L' (permissions); see TROUBLESHOOTING.md"
   fi
-else
-  bad "scanimage -L lists the fujitsu device" "brew install sane-backends"
+  ix500_usable=$(( fail == ix500_fail_before ? 1 : 0 ))
 fi
 
 printf '\n%s%d passed, %d failed%s\n' "$bold" "$pass" "$fail" "$reset"
+
+if (( brother_usable == 0 && ix500_usable == 0 )); then
+  printf '%sNo usable scanner.%s Connect the Brother (power + USB) or the iX500 (open lid + USB).\n' "$red" "$reset"
+  exit 1
+fi
 if [[ $fail -gt 0 ]]; then
   printf 'See TROUBLESHOOTING.md in ~/Arik/dev/office/scan-it for recovery steps.\n'
   exit 1
