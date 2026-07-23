@@ -98,7 +98,7 @@ jq -e '([.documents[].pages[].rotate] + [(.review // [])[].pages[].rotate])
 # comma thousands separators, two decimals). Receipts, invoices, and
 # statements must carry the document's total in that suffix.
 jq -e '.documents
-       | all(.type | IN("receipt","invoice","paycheck","contract","statement","letter","misc","tax"))' \
+       | all(.type | IN("receipt","invoice","paycheck","contract","statement","letter","medical","misc","tax"))' \
   "$manifest" >/dev/null || fail "unknown document type"
 jq -e '[.documents[] | select(.type != "paycheck")]
        | all(.name | type == "string" and
@@ -172,6 +172,7 @@ folder_for() {
     contract) echo contracts ;;
     statement) echo statements ;;
     letter) echo letters ;;
+    medical) echo medical ;;
     misc) echo misc ;;
     tax) echo taxes ;;
   esac

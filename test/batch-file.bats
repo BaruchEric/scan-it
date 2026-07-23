@@ -53,6 +53,22 @@ EOF
   [ "$(jq -r '.file' "$OUT/index.jsonl")" = "receipts/receipt-2026-06-08-home-depot \$45.23.pdf" ]
 }
 
+@test "files a medical document under medical/ with no amount suffix" {
+  page page-001.jpg LABS
+  cat > "$STAGING/manifest.json" <<'EOF'
+{
+  "batch": "batch-20260611-120000",
+  "documents": [
+    { "type": "medical", "name": "lab-results-timma-2026-06-01",
+      "pages": [ { "file": "pages/page-001.jpg", "rotate": 0 } ] }
+  ]
+}
+EOF
+  run "$BATCH_FILE" -o "$OUT" --no-text-layer "$STAGING"
+  [ "$status" -eq 0 ]
+  [ -f "$OUT/medical/lab-results-timma-2026-06-01.pdf" ]
+}
+
 @test "applies rotation so the page renders upright" {
   page page-001.jpg SIDEWAYS
   cat > "$STAGING/manifest.json" <<'EOF'
