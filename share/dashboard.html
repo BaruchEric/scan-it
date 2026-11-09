@@ -1839,7 +1839,21 @@ details.checks li { display: grid; grid-template-columns: 4.5em minmax(0, 1fr) a
     });
   }
 
-  function api(path, method, body) {
+  /* The token changes whenever the server restarts (a deploy, a crash, a
+     login), while a page left open keeps polling with GETs that need none.
+     So a POST refused for its token reads the new one and is sent once more.
+     The server checks the token before acting, so the refused try did nothing. */
+  function refreshToken() {
+    return fetch(LIVE.api.replace(/\/+$/, '') + '/token', { cache: 'no-store' }).then(function (r) {
+      return r.ok ? r.json() : null;
+    }).then(function (j) {
+      if (!j || typeof j.token !== 'string' || !j.token) return false;
+      LIVE.token = j.token;
+      return true;
+    }, function () { return false; });
+  }
+
+  function api(path, method, body, retried) {
     var init = { method: method || 'GET', headers: { 'X-Scan-Token': LIVE.token || '' }, cache: 'no-store' };
     if (init.method !== 'GET') {
       init.headers['Content-Type'] = 'application/json';
@@ -1849,6 +1863,14 @@ details.checks li { display: grid; grid-template-columns: 4.5em minmax(0, 1fr) a
       return r.text().then(function (t) {
         var j = null;
         try { j = t ? JSON.parse(t) : null; } catch (e) { j = null; }
+        if (r.status === 403 && j && j.code === 'token' && !retried) {
+          return refreshToken().then(function (ok) {
+            if (ok) return api(path, method, body, true);
+            var stale = new Error(j.error);
+            stale.status = 403;
+            throw stale;
+          });
+        }
         if (!r.ok) {
           var err = new Error(j && typeof j.error === 'string' && j.error ? j.error
             : r.status === 401 || r.status === 403 ? 'The live server no longer accepts this page. Reload it to reconnect.'

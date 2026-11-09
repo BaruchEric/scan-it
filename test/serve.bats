@@ -236,6 +236,21 @@ ROWN="https://dash.example.ts.net:8445"
   [ "$status" -eq 64 ]
 }
 
+@test "a stale token is refused with code token, and /api/token hands out the current one" {
+  run curl -s -X POST -H "X-Scan-Token: stale" -H "Content-Type: application/json" -d '{}' \
+    -w '\n%{http_code}' "$URL/api/dashboard/refresh"
+  [ "${lines[1]}" = "403" ]
+  [ "$(jq -r .code <<<"${lines[0]}")" = "token" ]
+  [ "$(curl -fs "$URL/api/token" | jq -r .token)" = "$TOKEN" ]
+  # The token endpoint sits behind the same identity checks as the page.
+  [ "$(code -H "Host: $RHOST" "$URL/api/token")" = "403" ]
+  [ "$(code -H "Host: scans.example.ca" "$EURL/api/token")" = "403" ]
+  [ "$(curl -fs -H "Host: scans.example.ca" -H "X-Gate-User: owner@gate.example" "$EURL/api/token" | jq -r .token)" = "$TOKEN" ]
+  # A cross-origin refusal carries no code, so the page never retries it.
+  run curl -s -X POST -H "Origin: https://evil.example" -H "X-Scan-Token: $TOKEN" -d '{}' "$URL/api/dashboard/refresh"
+  [ "$(jq -r '.code // "none"' <<<"$output")" = "none" ]
+}
+
 EHOST="scans.example.ca"
 EOWN="https://scans.example.ca"
 

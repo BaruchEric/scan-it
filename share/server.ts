@@ -114,7 +114,8 @@ interface Backend {
 }
 
 class HttpError extends Error {
-  constructor(readonly status: number, message: string) { super(message); }
+  /** code: a machine-readable reason the page acts on, such as "token". */
+  constructor(readonly status: number, message: string, readonly code?: string) { super(message); }
 }
 
 // ---------- configuration ----------
@@ -1180,6 +1181,10 @@ async function handle(req: Request, remote: Remote | null): Promise<Response> {
   if (req.method === "GET") {
     if (path === "/" || path === "/index.html") return page(remote);
     if (path === "/api/ping") return json({ app: "scan-it", root: ROOT, started: STARTED, mock: OPTS.mock });
+    // A page loaded before a restart holds the old token. It reads the new one
+    // here after a "token" refusal. Same Host and identity checks as the page,
+    // and no CORS, so it hands out nothing the page itself doesn't.
+    if (path === "/api/token") return json({ token: TOKEN, started: STARTED });
     if (path === "/api/status") return json(await status());
     let m = /^\/api\/jobs\/([A-Za-z0-9]+)$/.exec(path);
     if (m) {
@@ -1213,7 +1218,7 @@ async function handle(req: Request, remote: Remote | null): Promise<Response> {
   const notRemote = (what: string) => {
     if (remote) throw new HttpError(409, `${what} opens Finder on ${HOST}, so it works only from that Mac.`);
   };
-  if (!tokenOk(req)) throw new HttpError(403, "Missing or stale token. Reload the page.");
+  if (!tokenOk(req)) throw new HttpError(403, "Missing or stale token. Reload the page.", "token");
   const b = await body(req);
 
   if (path === "/api/scan") {
@@ -1298,7 +1303,7 @@ function listen(port: number, flag: string, route: (req: Request) => Promise<Res
         try {
           return await route(req);
         } catch (e) {
-          if (e instanceof HttpError) return json({ error: e.message }, e.status);
+          if (e instanceof HttpError) return json(e.code ? { error: e.message, code: e.code } : { error: e.message }, e.status);
           console.error(e);
           return json({ error: "The server hit an error. Check its terminal." }, 500);
         }
