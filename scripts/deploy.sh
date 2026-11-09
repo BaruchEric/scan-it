@@ -20,7 +20,8 @@ tailnet_url=${SCAN_DEPLOY_TAILNET_URL:-https://macmini-2018.tail2d2c60.ts.net:84
 tailnet_login=${SCAN_DEPLOY_TAILNET_LOGIN:-baruchhub@gmail.com}
 tunnel_host=${SCAN_DEPLOY_TUNNEL_HOST:-macmini-ts}
 edge_url=${SCAN_DEPLOY_EDGE_URL:-https://scans.beric.ca}
-edge_allow=${SCAN_DEPLOY_EDGE_ALLOW:-ericbaruch@gmail.com}
+# Eric, Elsa, Ariel and Jose: the family's beric.ca gate sign-ins.
+edge_allow=${SCAN_DEPLOY_EDGE_ALLOW:-ericbaruch@gmail.com,elsabaruch@gmail.com,arielbaruch@gmail.com,jmjordan720@gmail.com}
 edge_port=${SCAN_DEPLOY_EDGE_PORT:-7821}
 
 say() { printf '%s\n' "$*"; }
