@@ -21,6 +21,20 @@ bf() { "$BATCH_FILE" -o "$OUT" --no-text-layer --no-dashboard "$@"; }
 
 index_lines() { cat "$OUT"/_index/*.jsonl 2>/dev/null; }
 
+toolbin_without() { # <tool> — $TMP/toolbin: every tool on PATH but that one
+  # Linked one by one because on Linux the tool shares /usr/bin with the rest.
+  mkdir -p "$TMP/toolbin"
+  local dirs d f n
+  IFS=: read -ra dirs <<<"$PATH"
+  for d in "${dirs[@]}"; do
+    for f in "$d"/*; do
+      n=${f##*/}
+      [[ -x "$f" && "$n" != "$1" && ! -e "$TMP/toolbin/$n" ]] && ln -s "$f" "$TMP/toolbin/$n"
+    done
+  done
+  return 0
+}
+
 page() { # <filename> <label> [WxH]
   magick -size "${3:-600x800}" xc:white \
     -font /System/Library/Fonts/Supplemental/Andale\ Mono.ttf \
@@ -509,6 +523,98 @@ EOF
   [ -f "$DRIVE/Baruch/Health/MedicalRecords/lab-results-quest-2026-06-01-2.pdf" ]
 }
 
+# ---------- oversized copies ----------
+# MedicalRecords is a git repo whose remote refuses files over 100 MB, and a
+# 24-page color scan at 300 dpi is 125 MB. The filed PDF stays as scanned; the
+# copy that leaves the filing tree is downsampled once it passes the limit.
+
+noisy_page() { # <filename> — incompressible, so a one-page PDF passes 1 MB
+  magick -size 1275x1650 xc: +noise Random -quality 92 "$STAGING/pages/$1"
+}
+
+ppi() { pdfimages -list "$1" | awk 'NR == 3 { print $13 }'; }
+
+monitor_doc() { # one medical document on page 1, bound for MedicalRecords
+  noisy_page page-001.jpg
+  entities_registry
+  one_doc '{ "type": "medical", "name": "cardiac-monitor-philips-2026-06-03", "entity": "personal",
+             "pages": [ { "file": "pages/page-001.jpg", "rotate": 0 } ] }'
+  FILED="$OUT/personal/medical/cardiac-monitor-philips-2026-06-03.pdf"
+  COPY="$DRIVE/Baruch/Health/MedicalRecords/cardiac-monitor-philips-2026-06-03.pdf"
+}
+
+@test "a copy over SCAN_COPY_MAX_MB goes out at 200 dpi; the filed PDF keeps 300" {
+  command -v gs >/dev/null || skip "ghostscript not installed"
+  monitor_doc
+  export SCAN_COPY_MAX_MB=1
+  run bf "$STAGING"
+  [ "$status" -eq 0 ]
+  [ "$(ppi "$FILED")" = "300" ]
+  [ "$(ppi "$COPY")" = "200" ]
+  [ "$(qpdf --show-npages "$COPY")" = "1" ]
+  (( $(wc -c < "$COPY") < $(wc -c < "$FILED") ))
+  side="${FILED%.pdf}.json"
+  [ "$(jq -r '.followups.copy.status' "$side")" = "done" ]
+  [[ "$(jq -r '.followups.copy.note' "$side")" == *"200 dpi"* ]]
+}
+
+@test "without ghostscript an oversized copy goes out full size and the sidecar says so" {
+  monitor_doc
+  toolbin_without gs
+  run env PATH="$TMP/toolbin" SCAN_COPY_MAX_MB=1 "$BATCH_FILE" -o "$OUT" --no-text-layer --no-dashboard "$STAGING"
+  [ "$status" -eq 0 ]
+  cmp "$FILED" "$COPY"
+  side="${FILED%.pdf}.json"
+  [ "$(jq -r '.followups.copy.status' "$side")" = "done" ]
+  [[ "$(jq -r '.followups.copy.note' "$side")" == *"full size"* ]]
+}
+
+@test "a downsampled copy that comes out no smaller is dropped for the full-size one" {
+  monitor_doc
+  toolbin_without gs
+  # A ghostscript that hands the PDF back unchanged, as with pages already at 200 dpi.
+  cat > "$TMP/toolbin/gs" <<'EOF'
+#!/bin/sh
+for a in "$@"; do case "$a" in -sOutputFile=*) out=${a#-sOutputFile=} ;; esac; in=$a; done
+cp "$in" "$out"
+EOF
+  chmod +x "$TMP/toolbin/gs"
+  run env PATH="$TMP/toolbin" SCAN_COPY_MAX_MB=1 "$BATCH_FILE" -o "$OUT" --no-text-layer --no-dashboard "$STAGING"
+  [ "$status" -eq 0 ]
+  cmp "$FILED" "$COPY"
+  [[ "$(jq -r '.followups.copy.note' "${FILED%.pdf}.json")" == *"full size"* ]]
+}
+
+@test "ghostscript failing on an oversized copy: full-size copy, and the sidecar says it failed" {
+  monitor_doc
+  toolbin_without gs
+  printf '#!/bin/sh\nexit 1\n' > "$TMP/toolbin/gs"
+  chmod +x "$TMP/toolbin/gs"
+  run env PATH="$TMP/toolbin" SCAN_COPY_MAX_MB=1 "$BATCH_FILE" -o "$OUT" --no-text-layer --no-dashboard "$STAGING"
+  [ "$status" -eq 0 ]
+  cmp "$FILED" "$COPY"
+  [[ "$(jq -r '.followups.copy.note' "${FILED%.pdf}.json")" == *"full size"*"failed"* ]]
+}
+
+@test "SCAN_COPY_MAX_MB=0 never downsamples" {
+  monitor_doc
+  export SCAN_COPY_MAX_MB=0
+  run bf "$STAGING"
+  [ "$status" -eq 0 ]
+  cmp "$FILED" "$COPY"
+  [ "$(jq -r '.followups.copy.note' "${FILED%.pdf}.json")" = "null" ]
+}
+
+@test "SCAN_COPY_MAX_MB that is not a whole number: exit 64, nothing written" {
+  monitor_doc
+  export SCAN_COPY_MAX_MB=50MB
+  run bf "$STAGING"
+  [ "$status" -eq 64 ]
+  [[ "$output" == *"SCAN_COPY_MAX_MB"* ]]
+  [ ! -e "$OUT/personal" ]
+  [ ! -e "$DRIVE/Baruch" ]
+}
+
 @test "follow-ups: QuickBooks only for entities that keep books there; calendar on a due date" {
   page page-001.jpg INV1
   page page-002.jpg INV2
@@ -538,15 +644,7 @@ EOF
   page page-001.jpg RECEIPT
   page page-002.jpg BLANK
   receipt_manifest
-  # Every tool on PATH but ocrmypdf: on Linux it shares /usr/bin with the rest.
-  mkdir -p "$TMP/toolbin"
-  IFS=: read -ra dirs <<<"$PATH"
-  for d in "${dirs[@]}"; do
-    for f in "$d"/*; do
-      n=${f##*/}
-      [[ -x "$f" && "$n" != ocrmypdf && ! -e "$TMP/toolbin/$n" ]] && ln -s "$f" "$TMP/toolbin/$n"
-    done
-  done
+  toolbin_without ocrmypdf
   run env PATH="$TMP/toolbin" "$BATCH_FILE" -o "$OUT" "$STAGING"
   [ "$status" -eq 0 ]
   [[ "$output" == *"skipping searchable text layers"* ]]

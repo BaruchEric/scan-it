@@ -37,6 +37,10 @@ Options:
   --keep-staging        keep the staging dir even on full success
   -h, --help            show this help
 
+Env: SCAN_COPY_MAX_MB (default 50): a "copies" PDF larger than this goes out
+     as a 200 dpi rendering made with ghostscript, and the sidecar's copy note
+     says so. The filed PDF is never changed. 0 never downsamples.
+
 Exit codes:
   0 success   1 validation failure (nothing written)   2 assembly failure
   3 another batch-file is already filing this staging dir (nothing written)
@@ -45,6 +49,10 @@ EOF
 
 outdir="$default_outdir"
 drive_root="${SCAN_DRIVE_ROOT:-}"
+# A copy that leaves the filing tree can land in a git repo (MedicalRecords),
+# and GitHub refuses files over 100 MB. Past this size the copy goes out at
+# 200 dpi; the filed PDF stays as scanned.
+copy_max_mb="${SCAN_COPY_MAX_MB:-50}"
 text_layer=1
 dashboard=1
 keep_staging=0
@@ -71,6 +79,8 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ -n "$staging" ]] || { usage >&2; exit 64; }
+[[ "$copy_max_mb" =~ ^[0-9]+$ ]] \
+  || { echo "batch-file: SCAN_COPY_MAX_MB must be a whole number of MB (0 never downsamples), got '$copy_max_mb'" >&2; exit 64; }
 staging="${staging%/}"
 outdir="${outdir%/}"
 [[ -n "$drive_root" ]] || drive_root=$(dirname "$outdir")
@@ -276,12 +286,27 @@ add_text_layer() { # <pdf> — embed a searchable text layer in place
   fi
 }
 
+mb() { awk -v b="$1" 'BEGIN { printf "%.1f", b / 1048576 }'; }
+
+# Rewrite a PDF with its page images at 200 dpi. A text layer survives.
+shrink_pdf() { # <in.pdf> <out.pdf>
+  gs -q -dNOPAUSE -dBATCH -dSAFER -sDEVICE=pdfwrite \
+    -dDownsampleColorImages=true -dColorImageDownsampleType=/Bicubic \
+    -dColorImageResolution=200 -dColorImageDownsampleThreshold=1.0 \
+    -dDownsampleGrayImages=true -dGrayImageDownsampleType=/Bicubic \
+    -dGrayImageResolution=200 -dGrayImageDownsampleThreshold=1.0 \
+    -dAutoFilterColorImages=false -dColorImageFilter=/DCTEncode \
+    -dAutoFilterGrayImages=false -dGrayImageFilter=/DCTEncode \
+    -sOutputFile="$2" "$1" >/dev/null 2>&1
+}
+
 # Copy a filed PDF into the entity's Drive folder for its type, when
 # entities.json maps one ("copies": {"tax": "8328 De Soto Ave/Tax/{year}/..."}).
-# Echoes the copy's path relative to the Drive root; "!" + reason on failure;
-# nothing when the entity has no mapping for this type.
+# Echoes the copy's path relative to the Drive root, then a note on a second
+# line when the copy is not the filed PDF byte for byte; "!" + reason on
+# failure; nothing when the entity has no mapping for this type.
 copy_out() { # <pdf> <entity> <type> <year>
-  local pdf="$1" entity="$2" type="$3" year="$4" tpl dir target
+  local pdf="$1" entity="$2" type="$3" year="$4" tpl dir target size src small note=""
   tpl=$(jq -r --arg e "$entity" --arg t "$type" \
     'first(.entities[] | select(.slug == $e)) | .copies[$t] // empty' <<<"$registry_json")
   [[ -n "$tpl" ]] || return 0
@@ -291,8 +316,25 @@ copy_out() { # <pdf> <entity> <type> <year>
   dir="$drive_root/${tpl//\{year\}/$year}"
   if ! mkdir -p "$dir" 2>/dev/null; then echo "!cannot create $dir"; return 0; fi
   target=$(unique_target "$dir" "$(basename "${pdf%.pdf}")")
-  if cp "$pdf" "$target" 2>/dev/null; then
+  src="$pdf"
+  size=$(( $(wc -c < "$pdf") ))
+  if (( copy_max_mb > 0 && size > copy_max_mb * 1048576 )); then
+    small="$workdir/copy-out.pdf"
+    rm -f "$small"
+    if ! command -v gs >/dev/null 2>&1; then
+      note="full size, $(mb "$size") MB: ghostscript (gs) is not installed, so no 200 dpi copy"
+    elif ! shrink_pdf "$pdf" "$small"; then
+      note="full size, $(mb "$size") MB: ghostscript failed to write a 200 dpi copy"
+    elif (( $(wc -c < "$small") < size )); then
+      src="$small"
+      note="200 dpi copy, $(mb "$(wc -c < "$small")") MB (the filed PDF is $(mb "$size") MB)"
+    else
+      note="full size, $(mb "$size") MB: a 200 dpi copy came out no smaller"
+    fi
+  fi
+  if cp "$src" "$target" 2>/dev/null; then
     echo "${target#"$drive_root"/}"
+    [[ -z "$note" ]] || echo "$note"
   else
     echo "!copy to $dir failed"
   fi
@@ -301,7 +343,7 @@ copy_out() { # <pdf> <entity> <type> <year>
 filed_count=0
 
 file_document() { # <doc-json>
-  local doc="$1" type folder name entity year dest pdf rel copied filed side
+  local doc="$1" type folder name entity year dest pdf rel copied copy_note filed side
   type=$(jq -r '.type' <<<"$doc")
   folder=$(folder_for "$type")
   entity=$(jq -r '.entity' <<<"$doc")
@@ -318,6 +360,11 @@ file_document() { # <doc-json>
   fi
   add_text_layer "$pdf"
   copied=$(copy_out "$pdf" "$entity" "$type" "$year")
+  copy_note=""
+  if [[ "$copied" == *$'\n'* ]]; then
+    copy_note=${copied#*$'\n'}
+    copied=${copied%%$'\n'*}
+  fi
   filed=$(now)
   side="${pdf%.pdf}.json"
   jq -n "$jq_defs"'
@@ -335,13 +382,14 @@ file_document() { # <doc-json>
          (if $copied == "" then {}
           elif ($copied | startswith("!")) then
             {copy: {status: "failed", note: ($copied | ltrimstr("!")), updated: $filed, ref: null}}
-          else {copy: {status: "done", note: null, updated: $filed, ref: $copied}} end)
+          else {copy: {status: "done", note: (if $note == "" then null else $note end),
+                       updated: $filed, ref: $copied}} end)
          + (if ($doc.type | IN("receipt","invoice")) and ($ent.quickbooks // false)
             then {quickbooks: pending} else {} end)
          + (if ($doc.fields.due_date // null | iso) != null then {calendar: pending} else {} end)
          + (if $doc.type == "medical" then {vault: pending} else {} end))}' \
     --argjson doc "$doc" --argjson src "$source_json" --argjson reg "$registry_json" \
-    --arg filed "$filed" --arg copied "$copied" > "$side"
+    --arg filed "$filed" --arg copied "$copied" --arg note "$copy_note" > "$side"
   rel="$dest/$(basename "$pdf")"
   mkdir -p "$(dirname "$index_file")"
   jq -c --arg file "$rel" '{file: $file, type, entity, date, year, fields,
@@ -352,7 +400,7 @@ file_document() { # <doc-json>
   case "$copied" in
     "") ;;
     "!"*) echo "    copy FAILED: ${copied#!}" >&2 ;;
-    *) echo "    copied to $copied" ;;
+    *) echo "    copied to $copied${copy_note:+ ($copy_note)}" ;;
   esac
 }
 
