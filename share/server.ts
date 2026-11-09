@@ -10,7 +10,8 @@
  * Local only: it binds 127.0.0.1, refuses any Host header other than its own
  * (DNS rebinding), and every POST must carry the per-launch token embedded in
  * the page. Jobs run detached with their output in <staging>/.logs, so they
- * keep going if the server stops.
+ * keep going if the server stops. With --edge-url it opens a second loopback
+ * listener for the beric-mac Cloudflare tunnel (see EDGE below).
  *
  * SCAN_SERVE_MOCK=1 (or --mock) swaps the scanners, batches and jobs for a
  * simulation, for UI work without paper or hardware.
@@ -131,6 +132,9 @@ function parseArgs(argv: string[]) {
     mock: process.env.SCAN_SERVE_MOCK === "1",
     publicUrl: process.env.SCAN_SERVE_PUBLIC_URL || null,
     allowLogins: (process.env.SCAN_SERVE_ALLOW_LOGINS ?? "").split(","),
+    edgeUrl: process.env.SCAN_SERVE_EDGE_URL || null,
+    edgeAllow: (process.env.SCAN_SERVE_EDGE_ALLOW ?? "").split(","),
+    edgePort: portOf(process.env.SCAN_SERVE_EDGE_PORT || "7821", "SCAN_SERVE_EDGE_PORT"),
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -142,19 +146,18 @@ function parseArgs(argv: string[]) {
     switch (a) {
       case "--root": opts.root = val(); break;
       case "--staging": opts.staging = val(); break;
-      case "--port": {
-        const p = Number(val());
-        if (!Number.isInteger(p) || p < 1 || p > 65535) fatal("--port must be 1-65535", 64);
-        opts.port = p;
-        break;
-      }
+      case "--port": opts.port = portOf(val(), "--port"); break;
       case "--no-open": opts.open = false; break;
       case "--mock": opts.mock = true; break;
       case "--public-url": opts.publicUrl = val(); break;
       case "--allow-login": opts.allowLogins.push(...val().split(",")); break;
+      case "--edge-url": opts.edgeUrl = val(); break;
+      case "--edge-allow": opts.edgeAllow.push(...val().split(",")); break;
+      case "--edge-port": opts.edgePort = portOf(val(), "--edge-port"); break;
       case "-h": case "--help":
         console.log("Usage: bun server.ts [--root DIR] [--staging DIR] [--port N] [--no-open] [--mock]\n" +
-          "                     [--public-url URL --allow-login LOGIN[,LOGIN]]");
+          "                     [--public-url URL --allow-login LOGIN[,LOGIN]]\n" +
+          "                     [--edge-url URL --edge-allow EMAIL[,EMAIL] [--edge-port N]]");
         process.exit(0);
       default: fatal(`unknown argument: ${a}`, 64);
     }
@@ -167,6 +170,12 @@ function parseArgs(argv: string[]) {
 function fatal(msg: string, code = 1): never {
   console.error(`scan-it server: ${msg}`);
   process.exit(code);
+}
+
+function portOf(raw: string, what: string): number {
+  const p = Number(raw);
+  if (!Number.isInteger(p) || p < 1 || p > 65535) fatal(`${what} must be 1-65535`, 64);
+  return p;
 }
 
 const OPTS = parseArgs(Bun.argv.slice(2));
@@ -184,24 +193,46 @@ const ORIGINS = [`http://127.0.0.1:${OPTS.port}`, `http://localhost:${OPTS.port}
 const HOSTS = [`127.0.0.1:${OPTS.port}`, `localhost:${OPTS.port}`];
 
 /**
- * Remote access: tailscale serve on another machine proxies its HTTPS URL to
- * this port through a reverse SSH tunnel (bin/scan-tunnel). Requests for that
- * URL keep its Host, and serve stamps Tailscale-User-Login with the signed-in
- * tailnet user, replacing any copy the client sent. Tagged nodes get none. The
- * login is the gate: the page hands its token to whoever can load it.
+ * A public URL that reaches this server, and who may use it. Each one trusts
+ * exactly one identity header, and only for its own Host: the header one
+ * proxy sets is a header the other proxy passes through untouched. The
+ * identity is the gate, since the page hands its token to whoever loads it.
  */
-interface Remote { url: string; host: string; origin: string; logins: string[] }
-
-function remoteConfig(): Remote | null {
-  if (OPTS.publicUrl === null) return null;
-  let u: URL;
-  try { u = new URL(OPTS.publicUrl); } catch { fatal(`--public-url is not a URL: ${OPTS.publicUrl}`, 64); }
-  if (u.protocol !== "https:" && u.protocol !== "http:") fatal("--public-url must be http(s)", 64);
-  const logins = OPTS.allowLogins.map((l) => l.trim().toLowerCase()).filter((l) => l !== "");
-  if (!logins.length) fatal("--public-url needs --allow-login: the tailnet logins that may use it", 64);
-  return { url: `${u.origin}/`, host: u.host, origin: u.origin, logins };
+interface Remote {
+  url: string; host: string; origin: string;
+  header: string; who: string; logins: string[];
 }
-const REMOTE = remoteConfig();
+
+function remoteConfig(raw: string | null, allow: string[], header: string, who: string,
+                      flags: { url: string; allow: string }): Remote | null {
+  if (raw === null) return null;
+  let u: URL;
+  try { u = new URL(raw); } catch { fatal(`${flags.url} is not a URL: ${raw}`, 64); }
+  if (u.protocol !== "https:" && u.protocol !== "http:") fatal(`${flags.url} must be http(s)`, 64);
+  const logins = allow.map((l) => l.trim().toLowerCase()).filter((l) => l !== "");
+  if (!logins.length) fatal(`${flags.url} needs ${flags.allow}: the ${who}s that may use it`, 64);
+  return { url: `${u.origin}/`, host: u.host, origin: u.origin, header, who, logins };
+}
+
+/**
+ * Tailnet: tailscale serve on another machine proxies its HTTPS URL to the
+ * main port through a reverse SSH tunnel (bin/scan-tunnel). Requests keep
+ * that URL's Host, and serve stamps Tailscale-User-Login with the signed-in
+ * tailnet user, replacing any copy the client sent. Tagged nodes get none.
+ */
+const TAILNET = remoteConfig(OPTS.publicUrl, OPTS.allowLogins, "tailscale-user-login", "tailnet login",
+  { url: "--public-url", allow: "--allow-login" });
+
+/**
+ * Edge: the beric-mac Cloudflare tunnel on this Mac sends the edge URL to a
+ * second loopback listener, --edge-port. The beric.ca edge Worker deletes any
+ * X-Gate-* header a caller sends and sets X-Gate-User from the gate's own
+ * check, so that header is the only identity that listener trusts. Tailscale
+ * headers mean nothing there: through Cloudflare anyone can send them.
+ */
+const EDGE = remoteConfig(OPTS.edgeUrl, OPTS.edgeAllow, "x-gate-user", "beric.ca sign-in",
+  { url: "--edge-url", allow: "--edge-allow" });
+if (EDGE && OPTS.edgePort === OPTS.port) fatal("--edge-port must differ from --port", 64);
 
 const CHILD_ENV: Record<string, string> = {
   ...Object.fromEntries(Object.entries(process.env).filter((e): e is [string, string] => e[1] !== undefined)),
@@ -1037,7 +1068,7 @@ async function buildCatalog(): Promise<unknown> {
 /** JSON safe inside a <script> block: every "<" escaped, as scan-catalog does. */
 const scriptJson = (v: unknown) => JSON.stringify(v).replace(/</g, "\\u003c");
 
-async function page(remote: boolean): Promise<Response> {
+async function page(remote: Remote | null): Promise<Response> {
   let html: string;
   try { html = readFileSync(TEMPLATE, "utf8"); } catch {
     return new Response(`Dashboard template missing: ${TEMPLATE}`, { status: 500 });
@@ -1046,9 +1077,9 @@ async function page(remote: boolean): Promise<Response> {
   const live = {
     api: "/api", files: "/files/", token: TOKEN, started: STARTED, host: HOST,
     default_user: defaultUser(), mock: OPTS.mock, poll_ms: 3000,
-    url: remote && REMOTE ? REMOTE.url : `http://127.0.0.1:${OPTS.port}/`,
+    url: remote ? remote.url : `http://127.0.0.1:${OPTS.port}/`,
     // Reveal opens Finder on this Mac, which a remote viewer can't see.
-    remote,
+    remote: remote !== null,
   };
   const body = html
     .split("\n")
@@ -1114,18 +1145,37 @@ async function status(force = false) {
   return { now: now(), mock: OPTS.mock, scanners: overlayRestart(probed, jobs), batches, jobs };
 }
 
-async function handle(req: Request): Promise<Response> {
+const wrongHost = () => new Response("Wrong host.", { status: 421 });
+
+/** null when the remote's identity header names an allowed login, else the refusal. */
+function refuse(req: Request, remote: Remote): Response | null {
+  const login = (req.headers.get(remote.header) ?? "").trim().toLowerCase();
+  if (remote.logins.includes(login)) return null;
+  const seen = login === "" ? `no ${remote.who} arrived` : `signed in as ${login}`;
+  return new Response(`This dashboard is limited to its owner's ${remote.who} (${seen}).`, {
+    status: 403, headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" },
+  });
+}
+
+/** The main port: this Mac's own browser, or the tailnet URL. */
+function viaMain(req: Request): Promise<Response> | Response {
+  const host = req.headers.get("host") ?? "";
+  if (HOSTS.includes(host)) return handle(req, null);
+  if (TAILNET === null || host !== TAILNET.host) return wrongHost();
+  return refuse(req, TAILNET) ?? handle(req, TAILNET);
+}
+
+/** The edge port: only the edge URL, and only X-Gate-User counts. */
+function viaEdge(edge: Remote) {
+  return (req: Request): Promise<Response> | Response => {
+    if ((req.headers.get("host") ?? "") !== edge.host) return wrongHost();
+    return refuse(req, edge) ?? handle(req, edge);
+  };
+}
+
+async function handle(req: Request, remote: Remote | null): Promise<Response> {
   const url = new URL(req.url);
   const path = url.pathname;
-  const host = req.headers.get("host") ?? "";
-  const remote = REMOTE !== null && host === REMOTE.host;
-  if (!remote && !HOSTS.includes(host)) return new Response("Wrong host.", { status: 421 });
-  if (remote) {
-    const login = (req.headers.get("tailscale-user-login") ?? "").toLowerCase();
-    if (!REMOTE.logins.includes(login)) {
-      return new Response("This dashboard is limited to its owner's tailnet login.", { status: 403 });
-    }
-  }
 
   if (req.method === "GET") {
     if (path === "/" || path === "/index.html") return page(remote);
@@ -1158,7 +1208,7 @@ async function handle(req: Request): Promise<Response> {
 
   if (req.method !== "POST") throw new HttpError(405, "Method not allowed.");
   const origin = req.headers.get("origin");
-  const origins = remote && REMOTE ? [REMOTE.origin] : ORIGINS;
+  const origins = remote ? [remote.origin] : ORIGINS;
   if (origin !== null && !origins.includes(origin)) throw new HttpError(403, "Cross-origin request refused.");
   const notRemote = (what: string) => {
     if (remote) throw new HttpError(409, `${what} opens Finder on ${HOST}, so it works only from that Mac.`);
@@ -1238,30 +1288,35 @@ async function handle(req: Request): Promise<Response> {
   throw new HttpError(404, "Not found.");
 }
 
-let server: ReturnType<typeof Bun.serve>;
-try {
-  server = Bun.serve({
-    hostname: "127.0.0.1",
-    port: OPTS.port,
-    idleTimeout: 60,
-    async fetch(req) {
-      try {
-        return await handle(req);
-      } catch (e) {
-        if (e instanceof HttpError) return json({ error: e.message }, e.status);
-        console.error(e);
-        return json({ error: "The server hit an error. Check its terminal." }, 500);
-      }
-    },
-  });
-} catch (e) {
-  fatal(`can't listen on 127.0.0.1:${OPTS.port} (${e instanceof Error ? e.message : String(e)}). Is another program using it? Pass --port.`);
+function listen(port: number, flag: string, route: (req: Request) => Promise<Response> | Response) {
+  try {
+    return Bun.serve({
+      hostname: "127.0.0.1",
+      port,
+      idleTimeout: 60,
+      async fetch(req) {
+        try {
+          return await route(req);
+        } catch (e) {
+          if (e instanceof HttpError) return json({ error: e.message }, e.status);
+          console.error(e);
+          return json({ error: "The server hit an error. Check its terminal." }, 500);
+        }
+      },
+    });
+  } catch (e) {
+    fatal(`can't listen on 127.0.0.1:${port} (${e instanceof Error ? e.message : String(e)}). Is another program using it? Pass ${flag}.`);
+  }
 }
+
+const server = listen(OPTS.port, "--port", viaMain);
+if (EDGE) listen(OPTS.edgePort, "--edge-port", viaEdge(EDGE));
 
 const url = `http://127.0.0.1:${server.port}/`;
 console.log(`scan-it live dashboard: ${url}${OPTS.mock ? "  (mock data)" : ""}`);
 console.log(`  filing root: ${ROOT}`);
-if (REMOTE) console.log(`  remote:      ${REMOTE.url} for ${REMOTE.logins.join(", ")}`);
+if (TAILNET) console.log(`  tailnet:     ${TAILNET.url} for ${TAILNET.logins.join(", ")}`);
+if (EDGE) console.log(`  edge:        ${EDGE.url} for ${EDGE.logins.join(", ")}, via 127.0.0.1:${OPTS.edgePort}`);
 console.log(`  staging:     ${STAGING}`);
 console.log("  Ctrl-C stops the server. Scans and filing jobs it started keep running.");
 if (OPTS.open) spawn("open", [url], { stdio: "ignore", detached: true }).unref();

@@ -1,0 +1,17 @@
+{
+  "name": "scan-it",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun --watch share/server.ts --mock --port 7830 --no-open",
+    "start": "bin/scan-catalog serve",
+    "typecheck": "tsc -p .",
+    "test": "bats test/",
+    "deploy": "scripts/deploy.sh",
+    "logs": "tail -f ~/Library/Logs/scan-it-dashboard.log ~/Library/Logs/scan-it-tunnel.log"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.4.4",
+    "typescript": "^7.0.2"
+  }
+}

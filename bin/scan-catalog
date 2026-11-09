@@ -29,14 +29,19 @@ Commands:
   dashboard [--open]          write ROOT/dashboard.html (every entity) and
                               ROOT/<entity>/dashboard.html (that entity only)
   serve [--port N] [--no-open] [--mock] [--public-url URL --allow-login LOGINS]
+        [--edge-url URL --edge-allow EMAILS [--edge-port N]]
                               run the live dashboard on http://127.0.0.1:N/
                               (default 7820): scanner status, batches in
                               progress, and buttons to scan, stop, file and
                               diagnose. Needs bun. --public-url also accepts
                               requests for URL (tailscale serve on another
                               machine, reached through scan-tunnel), from the
-                              comma-separated tailnet logins only.
-  serve --install [--port N] [--public-url URL --allow-login LOGINS] [--tunnel HOST]
+                              comma-separated tailnet logins only. --edge-url
+                              opens a second loopback listener (default 7821)
+                              for a Cloudflare tunnel behind the beric.ca edge
+                              gate, for the comma-separated gate emails only.
+  serve --install [--port N] [--public-url URL --allow-login LOGINS]
+                  [--edge-url URL --edge-allow EMAILS [--edge-port N]] [--tunnel HOST]
                               keep it running at login as a LaunchAgent
                               (ca.beric.scan-it-dashboard). --tunnel adds a
                               second one (ca.beric.scan-it-tunnel) running
@@ -247,7 +252,7 @@ case "$cmd" in
           [[ $# -ge 2 && "$2" =~ ^[0-9]+$ ]] || die "--port requires a number" 64
           port="$2"; shift 2 ;;
         --no-open|--mock) server_args+=("$1"); shift ;;
-        --public-url|--allow-login)
+        --public-url|--allow-login|--edge-url|--edge-allow|--edge-port)
           [[ $# -ge 2 && -n "$2" ]] || die "$1 requires a value" 64
           remote_args+=("$1" "$2"); shift 2 ;;
         --tunnel)

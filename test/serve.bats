@@ -68,6 +68,14 @@ HTML
 
   PORT=$(( 20000 + RANDOM % 20000 ))
   URL="http://127.0.0.1:$PORT"
+
+  # The edge URL as the beric-mac Cloudflare tunnel delivers it: its own
+  # listener, this Host, and X-Gate-User from the edge Worker.
+  EPORT=$(( PORT + 1 ))
+  EURL="http://127.0.0.1:$EPORT"
+  export SCAN_SERVE_EDGE_URL="https://scans.example.ca"
+  export SCAN_SERVE_EDGE_ALLOW="owner@gate.example"
+  export SCAN_SERVE_EDGE_PORT="$EPORT"
   bun "$BATS_TEST_DIRNAME/../share/server.ts" --root "$ROOT" --staging "$STAGING" \
     --port "$PORT" --no-open > "$TMP/server.log" 2>&1 &
   SERVER=$!
@@ -226,6 +234,71 @@ ROWN="https://dash.example.ts.net:8445"
   [[ "$output" == *"--allow-login"* ]]
   run "$BATS_TEST_DIRNAME/../bin/scan-catalog" -r "$ROOT" serve --tunnel somehost
   [ "$status" -eq 64 ]
+}
+
+EHOST="scans.example.ca"
+EOWN="https://scans.example.ca"
+
+@test "the edge URL answers on its own listener, for an allowed X-Gate-User only" {
+  [ "$(code -H "Host: $EHOST" "$EURL/api/ping")" = "403" ]
+  [ "$(code -H "Host: $EHOST" -H "X-Gate-User: someone@gate.example" "$EURL/api/ping")" = "403" ]
+  [[ "$(curl -s -H "Host: $EHOST" -H "X-Gate-User: someone@gate.example" "$EURL/api/ping")" == *"signed in as someone@gate.example"* ]]
+  [ "$(code -H "Host: $EHOST" -H "X-Gate-User: Owner@Gate.example" "$EURL/api/ping")" = "200" ]
+  # The edge listener serves the edge URL and nothing else.
+  [ "$(code -H "Host: 127.0.0.1:$EPORT" -H "X-Gate-User: owner@gate.example" "$EURL/api/ping")" = "421" ]
+  [ "$(code -H "Host: 127.0.0.1:$PORT" "$EURL/api/ping")" = "421" ]
+  page=$(curl -fs -H "Host: $EHOST" -H "X-Gate-User: owner@gate.example" "$EURL/")
+  [[ "$page" == *'"remote":true'* ]]
+  [[ "$page" == *'"url":"https://scans.example.ca/"'* ]]
+}
+
+@test "each URL trusts only its own identity header" {
+  # Through Cloudflare anyone can send Tailscale-User-Login, even the tailnet owner's.
+  [ "$(code -H "Host: $EHOST" -H "Tailscale-User-Login: owner@example.com" "$EURL/api/ping")" = "403" ]
+  [ "$(code -H "Host: $RHOST" -H "Tailscale-User-Login: owner@example.com" "$EURL/api/ping")" = "421" ]
+  # tailscale serve passes X-Gate-User through, so the main port never reads it.
+  [ "$(code -H "Host: $RHOST" -H "X-Gate-User: owner@gate.example" "$URL/api/ping")" = "403" ]
+  [ "$(code -H "Host: $EHOST" -H "X-Gate-User: owner@gate.example" "$URL/api/ping")" = "421" ]
+}
+
+@test "edge POSTs need the edge origin, and can't open Finder on the Mac" {
+  epost() { # <path> <origin>
+    curl -s -X POST -H "Host: $EHOST" -H "X-Gate-User: owner@gate.example" -H "Origin: $2" \
+      -H "X-Scan-Token: $TOKEN" -H "Content-Type: application/json" -d '{}' -w '\n%{http_code}' "$EURL$1"
+  }
+  run epost /api/batches/batch-20261101-100000/stop "$ROWN"
+  [ "${lines[1]}" = "403" ]
+  run epost /api/batches/batch-20261101-100000/stop "$EOWN"
+  [ "${lines[1]}" = "409" ]
+  [[ "${lines[0]}" == *"not scanning"* ]]
+  run epost /api/batches/batch-20261101-100000/reveal "$EOWN"
+  [ "${lines[1]}" = "409" ]
+  [[ "${lines[0]}" == *"only from that Mac"* ]]
+  run epost /api/reveal "$EOWN"
+  [ "${lines[1]}" = "409" ]
+}
+
+@test "an edge URL without an allowlist, or on the main port, refuses to start" {
+  SCAN_SERVE_EDGE_ALLOW="" run bun "$BATS_TEST_DIRNAME/../share/server.ts" --root "$ROOT" \
+    --staging "$STAGING" --port 1 --no-open
+  [ "$status" -eq 64 ]
+  [[ "$output" == *"--edge-allow"* ]]
+  run bun "$BATS_TEST_DIRNAME/../share/server.ts" --root "$ROOT" --staging "$STAGING" \
+    --port 1 --edge-port 1 --no-open
+  [ "$status" -eq 64 ]
+  [[ "$output" == *"--edge-port must differ"* ]]
+}
+
+@test "scan-catalog serve passes the edge flags to the server" {
+  local p=$(( EPORT + 1 )) e=$(( EPORT + 2 ))
+  SCAN_SERVE_EDGE_URL="" SCAN_SERVE_EDGE_ALLOW="" SCAN_SERVE_EDGE_PORT="" \
+    "$BATS_TEST_DIRNAME/../bin/scan-catalog" -r "$ROOT" serve --port "$p" --no-open \
+    --edge-url https://edge.example.ca --edge-allow a@gate.example --edge-port "$e" > "$TMP/second.log" 2>&1 &
+  SLEEPER=$!
+  for _ in $(seq 1 50); do curl -fs -H "Host: edge.example.ca" -H "X-Gate-User: a@gate.example" \
+    "http://127.0.0.1:$e/api/ping" >/dev/null 2>&1 && break; sleep 0.1; done
+  [ "$(code -H "Host: edge.example.ca" -H "X-Gate-User: a@gate.example" "http://127.0.0.1:$e/api/ping")" = "200" ]
+  grep -q "edge:        https://edge.example.ca/ for a@gate.example, via 127.0.0.1:$e" "$TMP/second.log"
 }
 
 wait_job() { # <job id>; prints the finished job's JSON
