@@ -137,7 +137,7 @@ discover_scanner() {
 
 if ! discover_scanner; then
   echo "scan-batch: no scanner found (looked for: $scanner)." >&2
-  echo "  Brother: check power/USB and that the Push Scan Tool services run." >&2
+  echo "  Brother: check power/USB and run scan-diag (Push Scan Tool services on macOS, ipp-usb on Linux)." >&2
   echo "  iX500: check the lid is open (that powers it on) and USB is connected." >&2
   echo "  Run scan-diag for a full checkup." >&2
   exit 1

@@ -103,7 +103,7 @@ if [[ -z "$device_kind" && "$scanner" != "brother" ]] \
 fi
 if [[ -z "$device_kind" ]]; then
   echo "scan2pdf: no scanner found (looked for: $scanner)." >&2
-  echo "  Brother: check power/USB and that the Push Scan Tool services run." >&2
+  echo "  Brother: check power/USB and run scan-diag (Push Scan Tool services on macOS, ipp-usb on Linux)." >&2
   echo "  iX500: check the lid is open (that powers it on) and USB is connected." >&2
   echo "  Run scan-diag for a full checkup." >&2
   exit 1
@@ -121,7 +121,7 @@ if [[ "$device_kind" == "escl" ]]; then
   fi
 fi
 
-tmpdir=$(mktemp -d -t scan2pdf)
+tmpdir=$(mktemp -d "${TMPDIR:-/tmp}/scan2pdf.XXXXXX")
 trap 'rm -rf "$tmpdir"' EXIT
 
 echo "Scanning from '$device' ($source_opt, $mode, ${resolution}dpi)..."
@@ -186,5 +186,5 @@ if [[ $keep_pages -eq 1 ]]; then
   echo "Intermediate page images kept in: $pagedir"
 fi
 if [[ $open_pdf -eq 1 ]]; then
-  open "$pdf"
+  if [[ "$(uname)" == Darwin ]]; then open "$pdf"; else xdg-open "$pdf" >/dev/null 2>&1 || true; fi
 fi

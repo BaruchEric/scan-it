@@ -1,0 +1,119 @@
+#!/usr/bin/env bash
+# scan-mirror: copy the local filing tree to Google Drive through the NAS.
+#
+# On a Linux scan host the filing root is local (~/My Drive/scans) and Drive
+# holds a copy. The NAS holds the Drive token; this machine never does. Both
+# steps go through the NAS's forced-command key (SCAN_MIRROR_HOST):
+#   1. rsync the Drive root here (scans/ plus the folders entities.json copies
+#      into) to the NAS's mirror: adds and updates, never deletes
+#   2. "push": the NAS copies its mirror into My Drive with rclone, never deletes
+# A file moved or deleted here therefore stays where it was in Drive.
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage: scan-mirror [--rsync-only] [--status]
+       scan-mirror --import
+       scan-mirror --install [MINUTES] | --uninstall
+
+  --rsync-only   update the NAS's mirror, skip the push to Drive
+  --status       print the NAS's mirror size, import marker and Drive remote
+  --import       one time, on a new host: unpack Drive's scans/ (everything
+                 filed before) into the filing root, then let push run.
+                 Refuses when the filing root already has entities.json.
+  --install      run scan-mirror every MINUTES (default 15) as the systemd
+                 user timer scan-it-mirror.timer; --uninstall removes it
+
+Env: SCAN_MIRROR_HOST (ssh destination of the NAS receiver, required),
+     SCAN_DRIVE_ROOT (default: the filing root's parent, ~/My Drive).
+Exit codes: 0 done · 1 rsync or push failed · 64 usage · 75 another run holds the lock
+EOF
+}
+
+push=1 mode=mirror minutes=15
+case "${1:-}" in
+  "") ;;
+  --import) mode=import ;;
+  --install)
+    mode=install
+    if [[ -n "${2:-}" ]]; then
+      [[ "$2" =~ ^[1-9][0-9]*$ ]] || { echo "scan-mirror: --install takes whole minutes" >&2; exit 64; }
+      minutes=$2
+    fi ;;
+  --uninstall) mode=uninstall ;;
+  --rsync-only) push=0 ;;
+  --status) [[ -n "${SCAN_MIRROR_HOST:-}" ]] || { echo "scan-mirror: SCAN_MIRROR_HOST is not set" >&2; exit 64; }
+            exec ssh -n -o BatchMode=yes -o ConnectTimeout=10 "$SCAN_MIRROR_HOST" status ;;
+  -h|--help) usage; exit 0 ;;
+  *) usage >&2; exit 64 ;;
+esac
+unit_dir="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
+if [[ "$mode" == install || "$mode" == uninstall ]]; then
+  export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+  if [[ "$mode" == uninstall ]]; then
+    systemctl --user disable --now scan-it-mirror.timer 2>/dev/null || true
+    rm -f "$unit_dir/scan-it-mirror.service" "$unit_dir/scan-it-mirror.timer"
+    systemctl --user daemon-reload
+    echo "Removed scan-it-mirror.timer."
+    exit 0
+  fi
+  self=$(readlink -f "$0")
+  mkdir -p "$unit_dir"
+  cat > "$unit_dir/scan-it-mirror.service" <<UNIT
+# Written by scan-mirror --install. Remove with scan-mirror --uninstall.
+[Unit]
+Description=scan-it: copy the filing tree to Google Drive through the NAS
+
+[Service]
+Type=oneshot
+EnvironmentFile=-%h/.config/scan-it/env
+ExecStart=/bin/bash "$self"
+UNIT
+  cat > "$unit_dir/scan-it-mirror.timer" <<UNIT
+# Written by scan-mirror --install. Remove with scan-mirror --uninstall.
+[Unit]
+Description=scan-it: run scan-mirror every $minutes minutes
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=${minutes}min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+UNIT
+  systemctl --user daemon-reload
+  systemctl --user enable --now scan-it-mirror.timer >/dev/null 2>&1
+  echo "scan-mirror runs every $minutes minutes: scan-it-mirror.timer, log: journalctl --user -u scan-it-mirror"
+  exit 0
+fi
+
+[[ -n "${SCAN_MIRROR_HOST:-}" ]] || { echo "scan-mirror: SCAN_MIRROR_HOST is not set" >&2; exit 64; }
+root="${SCAN_ROOT:-$HOME/My Drive/scans}"
+drive_root="${SCAN_DRIVE_ROOT:-$(dirname "$root")}"
+[[ -d "$drive_root" ]] || { echo "scan-mirror: no Drive root at $drive_root" >&2; exit 1; }
+
+lock_dir="${XDG_CACHE_HOME:-$HOME/.cache}/scan-it"
+mkdir -p "$lock_dir"
+exec 9>"$lock_dir/mirror.lock"
+flock -n 9 || { echo "scan-mirror: another run is in progress" >&2; exit 75; }
+
+if [[ "$mode" == import ]]; then
+  [[ ! -e "$root/entities.json" ]] || { echo "scan-mirror: $root already has entities.json; not importing over it" >&2; exit 1; }
+  echo "scan-mirror: importing Drive's scans/ into $drive_root (the NAS copies it from Drive first)"
+  ssh -n -o BatchMode=yes -o ConnectTimeout=10 "$SCAN_MIRROR_HOST" import | tar -xf - -C "$drive_root" \
+    || { echo "scan-mirror: the import failed; push stays off" >&2; exit 1; }
+  [[ -f "$root/entities.json" ]] || { echo "scan-mirror: the import has no entities.json; push stays off" >&2; exit 1; }
+  echo "scan-mirror: $(find "$root" -type f | wc -l) files in $root"
+  ssh -n -o BatchMode=yes -o ConnectTimeout=10 "$SCAN_MIRROR_HOST" imported
+  exit 0
+fi
+
+# Dot files (locks, partial uploads, scan-it's own state) stay here.
+rsync -rt --exclude '.*' -e "ssh -o BatchMode=yes -o ConnectTimeout=10" \
+  "$drive_root/" "$SCAN_MIRROR_HOST:mirror/" \
+  || { echo "scan-mirror: rsync to $SCAN_MIRROR_HOST failed" >&2; exit 1; }
+echo "scan-mirror: $drive_root -> $SCAN_MIRROR_HOST mirror"
+(( push )) || exit 0
+ssh -n -o BatchMode=yes -o ConnectTimeout=10 "$SCAN_MIRROR_HOST" push \
+  || { echo "scan-mirror: the NAS's push to Drive failed" >&2; exit 1; }

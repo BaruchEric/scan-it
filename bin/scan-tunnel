@@ -1,30 +1,36 @@
 #!/bin/bash
-# Reverse SSH tunnel for the live dashboard: HOST's 127.0.0.1:PORT reaches this
-# Mac's 127.0.0.1:PORT, where scan-catalog serve listens. Publish it on HOST
-# with tailscale serve, and start the server with --public-url and
-# --allow-login so it accepts that URL. Both ends stay on loopback; nothing on
-# this Mac listens on the network.
+# Reverse SSH tunnel for the live dashboard: HOST's 127.0.0.1:REMOTE reaches
+# this machine's 127.0.0.1:LOCAL, where scan-catalog serve listens. Publish it
+# on HOST with tailscale serve (or a Cloudflare tunnel for the edge listener),
+# and start the server with --public-url and --allow-login so it accepts that
+# URL. Both ends stay on loopback; nothing here listens on the network.
 #
 # Runs in the foreground until the connection drops. scan-catalog serve
-# --install --tunnel HOST runs it as a LaunchAgent that restarts it.
+# --install --tunnel HOST runs it as a LaunchAgent (macOS) or a systemd user
+# unit (Linux) that restarts it.
 set -euo pipefail
 
 usage() {
   cat <<'EOF'
-Usage: scan-tunnel HOST [PORT]
+Usage: scan-tunnel HOST [LOCAL[:REMOTE]]...
 
-  HOST   ssh destination that runs tailscale serve (an alias from ~/.ssh/config)
-  PORT   port on both ends (default 7820)
+  HOST          ssh destination that runs tailscale serve (an ~/.ssh/config alias)
+  LOCAL:REMOTE  forward HOST's 127.0.0.1:REMOTE to 127.0.0.1:LOCAL here;
+                REMOTE defaults to LOCAL, and no spec at all means 7820
 
 Exit codes: 0 tunnel closed · 64 usage · other: ssh's own code
 EOF
 }
 
 [[ "${1:-}" == -h || "${1:-}" == --help ]] && { usage; exit 0; }
-[[ $# -ge 1 && $# -le 2 ]] || { usage >&2; exit 64; }
-host="$1"
-port="${2:-7820}"
-[[ "$port" =~ ^[0-9]+$ ]] || { echo "scan-tunnel: PORT must be a number" >&2; exit 64; }
+[[ $# -ge 1 ]] || { usage >&2; exit 64; }
+host="$1"; shift
+[[ $# -gt 0 ]] || set -- 7820
+locals=() remotes=()
+for spec in "$@"; do
+  [[ "$spec" =~ ^([0-9]+)(:([0-9]+))?$ ]] || { echo "scan-tunnel: bad port spec: $spec" >&2; exit 64; }
+  locals+=("${BASH_REMATCH[1]}"); remotes+=("${BASH_REMATCH[3]:-${BASH_REMATCH[1]}}")
+done
 
 ssh_opts=(-o BatchMode=yes -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=3)
 
@@ -34,16 +40,26 @@ ssh_opts=(-o BatchMode=yes -o ConnectTimeout=15 -o ServerAliveInterval=15 -o Ser
 # only from an sshd session of the same user. sshd sessions hide their sockets
 # from their own user, so the lookup needs passwordless sudo there; without it
 # the tunnel waits for the stale session to time out.
-ssh "${ssh_opts[@]}" "$host" bash -s -- "$port" <<'REMOTE' || true
-port="$1"
-line=$(sudo -n ss -ltnpH "sport = :$port" 2>/dev/null | head -1) || exit 0
-pid=$(grep -o '"sshd[^"]*",pid=[0-9]*' <<<"$line" | grep -o '[0-9]*$' | head -1)
-[ -n "$pid" ] || exit 0
-[ "$(ps -o user= -p "$pid" | tr -d ' ')" = "$(id -un)" ] || exit 0
-kill "$pid" && echo "scan-tunnel: freed port $port from stale sshd session $pid"
-sleep 1
+# A HOST that pins this key to a forced command (SCAN_TUNNEL_FREE=command)
+# gets "free PORT..." as the command line instead of the script below.
+if [[ "${SCAN_TUNNEL_FREE:-script}" == command ]]; then
+  ssh "${ssh_opts[@]}" "$host" free "${remotes[@]}" || true
+else
+  ssh "${ssh_opts[@]}" "$host" bash -s -- "${remotes[@]}" <<'REMOTE' || true
+for port in "$@"; do
+  line=$(sudo -n ss -ltnpH "sport = :$port" 2>/dev/null | head -1) || continue
+  pid=$(grep -o '"sshd[^"]*",pid=[0-9]*' <<<"$line" | grep -o '[0-9]*$' | head -1)
+  [ -n "$pid" ] || continue
+  [ "$(ps -o user= -p "$pid" | tr -d ' ')" = "$(id -un)" ] || continue
+  kill "$pid" && echo "scan-tunnel: freed port $port from stale sshd session $pid"
+  sleep 1
+done
 REMOTE
+fi
 
-echo "scan-tunnel: $host 127.0.0.1:$port -> 127.0.0.1:$port"
-exec ssh "${ssh_opts[@]}" -N -o ExitOnForwardFailure=yes \
-  -R "127.0.0.1:$port:127.0.0.1:$port" "$host"
+forwards=()
+for i in "${!locals[@]}"; do
+  echo "scan-tunnel: $host 127.0.0.1:${remotes[$i]} -> 127.0.0.1:${locals[$i]}"
+  forwards+=(-R "127.0.0.1:${remotes[$i]}:127.0.0.1:${locals[$i]}")
+done
+exec ssh "${ssh_opts[@]}" -N -o ExitOnForwardFailure=yes "${forwards[@]}" "$host"

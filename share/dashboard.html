@@ -1906,6 +1906,13 @@ details.checks li { display: grid; grid-template-columns: 4.5em minmax(0, 1fr) a
     return s && s.model ? s.model : scannerName(slug);
   }
   function allowed(x, a) { return arr(x.actions).indexOf(a) >= 0; }
+  /* Servers before can_reveal ran on a Mac, where only a remote viewer lacked Finder. */
+  function canReveal() { return LIVE.can_reveal !== undefined ? !!LIVE.can_reveal : !LIVE.remote; }
+  /* On Linux the Brother's one service is ipp-usb; on a Mac, the Push Scan Tool's three. */
+  function restartLabel(s) {
+    var ipp = s && Array.isArray(s.services) && s.services.some(function (sv) { return isObj(sv) && sv.name === 'ipp-usb'; });
+    return ipp ? 'Restart ipp-usb' : 'Restart Brother services';
+  }
 
   /* Every POST goes through here: one request per control at a time, the
      server's own error sentence shown next to the control, then a fresh poll. */
@@ -1967,7 +1974,7 @@ details.checks li { display: grid; grid-template-columns: 4.5em minmax(0, 1fr) a
     v.info = H('div');
     v.scanBtn = H('button', { class: 'act primary', type: 'button', text: 'Scan', 'aria-expanded': 'false' });
     v.diagBtn = H('button', { class: 'act', type: 'button', text: 'Diagnose' });
-    v.restartBtn = H('button', { class: 'act', type: 'button', text: 'Restart Brother services', hidden: true });
+    v.restartBtn = H('button', { class: 'act', type: 'button', text: restartLabel(s), hidden: true });
     v.err = H('p', { class: 'err', role: 'alert', hidden: true });
     v.msg = H('p', { class: 'msg', role: 'status', hidden: true });
 
@@ -2019,7 +2026,7 @@ details.checks li { display: grid; grid-template-columns: 4.5em minmax(0, 1fr) a
       post('diag', v.diagBtn, v.err, '/diag', {}, function () { flash(v.msg, 'Diagnostics running. The output is under Jobs.'); });
     });
     v.restartBtn.addEventListener('click', function () {
-      post('restart', v.restartBtn, v.err, '/brother/restart', {}, function () { flash(v.msg, 'Restarting the Brother services. Progress is under Jobs.'); });
+      post('restart', v.restartBtn, v.err, '/brother/restart', {}, function () { flash(v.msg, 'Restarting. Progress is under Jobs.'); });
     });
     v.el.append(v.info, H('div', { class: 'acts' }, v.scanBtn, v.diagBtn, v.restartBtn), v.err, v.msg, v.form);
     return v;
@@ -2035,7 +2042,7 @@ details.checks li { display: grid; grid-template-columns: 4.5em minmax(0, 1fr) a
     fact('Checked', agoSpan('', s.checked));
     var chips = null;
     if (Array.isArray(s.services)) {
-      chips = H('ul', { class: 'chips', 'aria-label': 'Brother services' });
+      chips = H('ul', { class: 'chips', 'aria-label': 'Scanner services' });
       s.services.filter(isObj).forEach(function (sv) {
         chips.append(H('li', null, icon(sv.running ? 'done' : 'failed', sv.running ? 'Running' : 'Stopped'), String(sv.name || 'service')));
       });
@@ -2061,7 +2068,7 @@ details.checks li { display: grid; grid-template-columns: 4.5em minmax(0, 1fr) a
     var restarting = s.state === 'restarting';
     v.restartBtn.hidden = !canRestart && !restarting;
     v.restartBtn.disabled = frozen || !canRestart || !!live.busy.restart;
-    v.restartBtn.textContent = restarting ? 'Restarting…' : 'Restart Brother services';
+    v.restartBtn.textContent = restarting ? 'Restarting…' : restartLabel(s);
     if (!allowed(s, 'scan') && !v.form.hidden) {
       v.form.hidden = true;
       v.scanBtn.setAttribute('aria-expanded', 'false');
@@ -2093,7 +2100,8 @@ details.checks li { display: grid; grid-template-columns: 4.5em minmax(0, 1fr) a
 
     v.copyBox = H('div', { class: 'copybox', hidden: true });
     v.btn.analyze.addEventListener('click', function () {
-      var text = 'Use the scan skill to analyze and file the staged batch at ' + (v.dir || v.id);
+      var text = 'Use the scan skill to analyze and file the staged batch at ' + (v.dir || v.id)
+        + (LIVE.platform && LIVE.platform !== 'darwin' ? ' on ' + LIVE.host + ' (over ssh)' : '');
       var done = function () {
         v.copyBox.hidden = true;
         flash(v.msg, 'Prompt copied. Paste it into Claude; Claude asks before it files anything.');
@@ -2174,8 +2182,8 @@ details.checks li { display: grid; grid-template-columns: 4.5em minmax(0, 1fr) a
     }
 
     BATCH_ACTIONS.forEach(function (a) {
-      /* Show in Finder opens Finder on the server's Mac, out of a remote viewer's sight. */
-      var ok = allowed(b, a[0]) && !(a[0] === 'reveal' && LIVE.remote);
+      /* Show in Finder opens Finder on the server's Mac: out of a remote viewer's sight, and absent on a Linux server. */
+      var ok = allowed(b, a[0]) && !(a[0] === 'reveal' && !canReveal());
       var btn = v.btn[a[0]];
       if (a[0] === 'discard') {
         if (!ok) v.confirm.hidden = true;
@@ -2261,7 +2269,7 @@ details.checks li { display: grid; grid-template-columns: 4.5em minmax(0, 1fr) a
       banner.hidden = true;
     }
     $('desk-refresh').disabled = live.frozen || !!live.busy.refresh;
-    $('desk-reveal').hidden = !!LIVE.remote;
+    $('desk-reveal').hidden = !canReveal();
     $('desk-reveal').disabled = live.frozen || !!live.busy.revealRoot;
     $('devs').hidden = !st;
     $('batches').hidden = !st;

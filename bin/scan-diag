@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # scan-diag — diagnostics for the scanning stack.
 #
-# Covers both scanners: the Brother ADS-4300N (eSCL via the Push Scan Tool's
-# localhost bridge) and the borrowed ScanSnap iX500 (SANE fujitsu backend).
+# Covers both scanners: the Brother ADS-4300N (eSCL: on macOS via the Push
+# Scan Tool's localhost bridge; on Linux via ipp-usb, on this machine or on the
+# scanner host named by SCAN_SCANNER_HOST) and the borrowed ScanSnap iX500
+# (SANE fujitsu backend).
 # A scanner that is not connected is skipped, not failed; the run fails only
 # when NO scanner is usable (or a shared tool is missing).
 #
@@ -25,6 +27,18 @@ skip() { printf '%sSKIP%s  %s\n' "$yellow" "$reset" "$1"; }
 
 script_dir=$(cd "$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")" && pwd)
 escl_scan="$script_dir/escl-scan"
+mac=0; [[ "$(uname)" == Darwin ]] && mac=1
+# pkg_hint <brew formula> <apt package>: the install hint for this platform
+pkg_hint() { if (( mac )); then echo "brew install $1"; else echo "sudo apt install $2"; fi; }
+# USB device list: ioreg on macOS, lsusb on Linux
+usb_list() { if (( mac )); then ioreg -p IOUSB -l -w0 2>/dev/null; else lsusb 2>/dev/null; fi; }
+usb_tool=$( (( mac )) && echo ioreg || echo lsusb )
+# Linux with the scanner on another host: its forced-command key answers
+# "status" with lsusb's Brother line and ipp-usb's state.
+host_status=""
+if (( ! mac )) && [[ -n "${SCAN_SCANNER_HOST:-}" ]]; then
+  host_status=$(ssh -o BatchMode=yes -o ConnectTimeout=5 "$SCAN_SCANNER_HOST" status 2>&1 || true)
+fi
 
 printf '%sscan-diag — scanning stack (Brother ADS-4300N / ScanSnap iX500)%s\n\n' "$bold" "$reset"
 
@@ -32,15 +46,20 @@ printf '%sscan-diag — scanning stack (Brother ADS-4300N / ScanSnap iX500)%s\n\
 if command -v img2pdf >/dev/null 2>&1; then
   ok "img2pdf installed"
 else
-  bad "img2pdf installed" "brew install img2pdf"
+  bad "img2pdf installed" "$(pkg_hint img2pdf img2pdf)"
 fi
 
 # ---- Brother ADS-4300N ----
 printf '\n%sBrother ADS-4300N%s\n' "$bold" "$reset"
 brother_fail_before=$fail
 
-brother_usb=0
-ioreg -p IOUSB -w0 2>/dev/null | grep -qi "ADS-4300N" && brother_usb=1
+brother_usb=0 brother_where="$usb_tool"
+if [[ -n "${SCAN_SCANNER_HOST:-}" ]] && (( ! mac )); then
+  grep -qi "ADS-4300N" <<<"$host_status" && brother_usb=1
+  brother_where="lsusb on $SCAN_SCANNER_HOST"
+else
+  usb_list | grep -qi "ADS-4300N" && brother_usb=1
+fi
 
 brother_endpoint=""
 if [[ -x "$escl_scan" ]]; then
@@ -48,22 +67,42 @@ if [[ -x "$escl_scan" ]]; then
 fi
 
 if [[ $brother_usb -eq 0 && -z "$brother_endpoint" ]]; then
-  skip "Brother not found (USB or Bonjour) — skipped; plug it in to check it"
+  if [[ -n "${SCAN_SCANNER_HOST:-}" ]] && (( ! mac )) && [[ -z "$host_status" || "$host_status" == *"denied"* ]]; then
+    bad "scanner host $SCAN_SCANNER_HOST answers" \
+      "ssh -o BatchMode=yes $SCAN_SCANNER_HOST status must work: check the key in its authorized_keys"
+  fi
+  skip "Brother not found (USB or eSCL) — skipped; plug it in to check it"
   brother_usable=0
 else
   if [[ $brother_usb -eq 1 ]]; then
-    ok "ADS-4300N visible on USB (ioreg)"
+    ok "ADS-4300N visible on USB ($brother_where)"
   else
     skip "ADS-4300N not on USB (reachable over the network instead)"
   fi
 
-  # The Push Scan Tool's background services publish the eSCL-over-USB bridge.
-  if pgrep -q -f "Brother/Utilities/Server/USBserver" \
-     && pgrep -q -f "Brother/Utilities/Server/NETserver"; then
-    ok "Brother Push Scan Tool services running"
-  else
-    bad "Brother Push Scan Tool services running" \
-      "log out and back in (LaunchAgent com.brother.LOGINserver starts them), or reinstall BrotherPushScanTool"
+  if (( mac )); then
+    # The Push Scan Tool's background services publish the eSCL-over-USB bridge.
+    if pgrep -q -f "Brother/Utilities/Server/USBserver" \
+       && pgrep -q -f "Brother/Utilities/Server/NETserver"; then
+      ok "Brother Push Scan Tool services running"
+    else
+      bad "Brother Push Scan Tool services running" \
+        "log out and back in (LaunchAgent com.brother.LOGINserver starts them), or reinstall BrotherPushScanTool"
+    fi
+  elif [[ -n "${SCAN_SCANNER_HOST:-}" ]]; then
+    # ipp-usb on the scanner host serves eSCL; scan-it-escl forwards it here.
+    if grep -q "ipp-usb active" <<<"$host_status"; then
+      ok "ipp-usb running on $SCAN_SCANNER_HOST"
+    else
+      bad "ipp-usb running on $SCAN_SCANNER_HOST" \
+        "restart it: ssh $SCAN_SCANNER_HOST restart (the dashboard's Restart button does the same)"
+    fi
+  elif [[ $brother_usb -eq 1 ]]; then
+    if systemctl is-active -q ipp-usb 2>/dev/null; then
+      ok "ipp-usb running"
+    else
+      bad "ipp-usb running" "$(pkg_hint - ipp-usb), then: sudo systemctl restart ipp-usb"
+    fi
   fi
 
   if [[ ! -x "$escl_scan" ]]; then
@@ -76,6 +115,9 @@ else
       bad "eSCL endpoint answering" \
         "endpoint found ($brother_endpoint) but ScannerStatus failed — replug USB, or check the Push Scan Tool services"
     fi
+  elif (( ! mac )); then
+    bad "eSCL endpoint answering (${ESCL_SCAN_ENDPOINT:-ESCL_SCAN_ENDPOINT unset})" \
+      "set ESCL_SCAN_ENDPOINT (see ~/.config/scan-it/env); if it is set, check the forward: systemctl status scan-it-escl"
   else
     bad "eSCL endpoint discovered (Bonjour _uscan._tcp)" \
       "replug the scanner's USB and check the Push Scan Tool services, then retry"
@@ -87,25 +129,27 @@ fi
 printf '\n%sScanSnap iX500 (borrowed)%s\n' "$bold" "$reset"
 ix500_fail_before=$fail
 
-if ! ioreg -p IOUSB -l -w0 2>/dev/null | grep -qi "ScanSnap iX500"; then
+if ! usb_list | grep -qi -E "ScanSnap iX500|04c5:132b"; then
   skip "iX500 not on USB — skipped (lid closed, unplugged, or returned)"
   ix500_usable=0
 else
-  ok "iX500 visible on USB (ioreg)"
+  ok "iX500 visible on USB ($usb_tool)"
 
   if command -v scanimage >/dev/null 2>&1; then
     ok "sane-backends installed (scanimage)"
   else
-    bad "sane-backends installed (scanimage)" "brew install sane-backends"
+    bad "sane-backends installed (scanimage)" "$(pkg_hint sane-backends sane-utils)"
   fi
 
-  # Fujitsu/PFU software must not be running — it holds the USB device.
-  fujitsu_procs=$(pgrep -fl -i "scansnap" 2>/dev/null || true)
-  if [[ -z "$fujitsu_procs" ]]; then
-    ok "no Fujitsu/ScanSnap software running"
-  else
-    bad "no Fujitsu/ScanSnap software running" \
-      "quit it: pkill -i scansnap — and see TROUBLESHOOTING.md about its LaunchAgents. Found: $fujitsu_procs"
+  # Fujitsu/PFU software must not be running — it holds the USB device (macOS only).
+  if (( mac )); then
+    fujitsu_procs=$(pgrep -fl -i "scansnap" 2>/dev/null || true)
+    if [[ -z "$fujitsu_procs" ]]; then
+      ok "no Fujitsu/ScanSnap software running"
+    else
+      bad "no Fujitsu/ScanSnap software running" \
+        "quit it: pkill -i scansnap — and see TROUBLESHOOTING.md about its LaunchAgents. Found: $fujitsu_procs"
+    fi
   fi
 
   if command -v sane-find-scanner >/dev/null 2>&1; then
@@ -116,7 +160,7 @@ else
         "replug the scanner; make sure no ScanSnap software is holding it"
     fi
   else
-    bad "sane-find-scanner available" "brew install sane-backends"
+    bad "sane-find-scanner available" "$(pkg_hint sane-backends sane-utils)"
   fi
 
   # SANE backend enumeration (the check that matters most)

@@ -83,7 +83,8 @@ if [[ -z "$paydate" ]]; then
 else
   paydate="${paydate//-/}"
   if [[ ! "$paydate" =~ ^[0-9]{8}$ ]] \
-     || [[ "$(date -j -f %Y%m%d "$paydate" +%Y%m%d 2>/dev/null || true)" != "$paydate" ]]; then
+     || [[ "$(date -j -f %Y%m%d "$paydate" +%Y%m%d 2>/dev/null \
+              || date -d "$paydate" +%Y%m%d 2>/dev/null || true)" != "$paydate" ]]; then
     echo "scan-checks: invalid paydate '$paydate' — use YYYYMMDD or YYYY-MM-DD" >&2
     exit 64
   fi
@@ -95,7 +96,7 @@ if [[ -e "$target" && $replace -eq 0 ]]; then
   echo "      (use --replace to start the paydate over)"
 fi
 
-tmpdir=$(mktemp -d -t scan-checks)
+tmpdir=$(mktemp -d "${TMPDIR:-/tmp}/scan-checks.XXXXXX")
 trap 'rm -rf "$tmpdir"' EXIT
 
 # Duplex is the whole point (back side carries the endorsement signature).
@@ -128,5 +129,5 @@ fi
 
 echo "$target"
 if [[ $open_pdf -eq 1 ]]; then
-  open "$target"
+  if [[ "$(uname)" == Darwin ]]; then open "$target"; else xdg-open "$target" >/dev/null 2>&1 || true; fi
 fi

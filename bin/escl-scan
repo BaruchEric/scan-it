@@ -2,9 +2,11 @@
 # escl-scan — minimal eSCL (AirScan) client for the Brother ADS-4300N.
 #
 # Drains the ADF into numbered JPEG page images, plus small probe modes the
-# other scan tools build on. Talks to the localhost eSCL bridge the Brother
-# Push Scan Tool publishes for USB; the same Bonjour discovery finds the
-# scanner's own eSCL server if it is ever connected over Ethernet instead.
+# other scan tools build on. ESCL_SCAN_ENDPOINT names the endpoint outright
+# (on the scan-it LXC: ipp-usb on pve, forwarded to http://localhost:60000/eSCL).
+# Without it, a cached endpoint is tried, then Bonjour (dns-sd on macOS), which
+# finds the Push Scan Tool's localhost bridge for USB or the scanner's own
+# eSCL server on Ethernet.
 #
 # Part of the scan-it project (~/Arik/dev/office/scan-it).
 set -euo pipefail
@@ -23,6 +25,7 @@ Options:
   -o, --outdir DIR     directory for page images (required to scan)
       --start N        number the first page N (default: 1)
       --endpoint URL   skip discovery, use this eSCL base URL
+                       (default: $ESCL_SCAN_ENDPOINT, then discovery)
   -h, --help           show this help
 
 Exit codes (scan mode):
@@ -35,7 +38,7 @@ color_mode="RGB24"
 resolution=300
 outdir=""
 start_num=1
-endpoint=""
+endpoint="${ESCL_SCAN_ENDPOINT:-}"
 action="scan"
 
 while [[ $# -gt 0 ]]; do
@@ -84,6 +87,7 @@ discover_endpoint() {
     ep=$(<"$cache_file")
     if [[ -n "$ep" ]] && endpoint_alive "$ep"; then printf '%s\n' "$ep"; return 0; fi
   fi
+  command -v dns-sd >/dev/null 2>&1 || return 1
   instances=$(bonjour 2 -B _uscan._tcp local. \
     | sed -n '/ Add /s/.*_uscan\._tcp\.[[:space:]]*//p' | awk '!seen[$0]++')
   [[ -n "$instances" ]] || return 1
@@ -113,7 +117,8 @@ if [[ -z "$endpoint" ]]; then
   if ! endpoint=$(discover_endpoint); then
     echo "escl-scan: no eSCL scanner found." >&2
     echo "  Check the Brother is powered on and its USB is connected, and that the" >&2
-    echo "  Brother Push Scan Tool services are running (run scan-diag)." >&2
+    echo "  Brother Push Scan Tool services are running, or set ESCL_SCAN_ENDPOINT" >&2
+    echo "  (run scan-diag)." >&2
     exit 1
   fi
 fi
@@ -146,7 +151,7 @@ if ! grep -q 'ScannerAdfLoaded' <<<"$st"; then
   exit 2
 fi
 
-settings_file=$(mktemp -t escl-settings)
+settings_file=$(mktemp "${TMPDIR:-/tmp}/escl-settings.XXXXXX")
 part_file=""
 trap 'rm -f "$settings_file" ${part_file:+"$part_file"}' EXIT
 cat > "$settings_file" <<XML

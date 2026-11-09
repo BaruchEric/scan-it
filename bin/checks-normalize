@@ -156,7 +156,7 @@ done
 
 for pdf in "$@"; do
   [[ -f "$pdf" ]] || { echo "checks-normalize: no such file: $pdf" >&2; exit 66; }
-  tmp=$(mktemp -d -t checks-normalize)
+  tmp=$(mktemp -d "${TMPDIR:-/tmp}/checks-normalize.XXXXXX")
   # shellcheck disable=SC2064
   trap "rm -rf '$tmp'" EXIT
 

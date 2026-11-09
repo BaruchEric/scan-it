@@ -143,7 +143,8 @@ post() { # <path> [json]
   run post /api/batches/batch-20261101-100000/discard
   [ "${lines[1]}" = "200" ]
   [ ! -d "$STAGING/batch-20261101-100000" ]
-  [ -d "$HOME/.Trash/batch-20261101-100000/pages" ]
+  if [[ "$(uname)" == Darwin ]]; then trash="$HOME/.Trash"; else trash="${XDG_DATA_HOME:-$HOME/.local/share}/Trash/files"; fi
+  [ -d "$trash/batch-20261101-100000/pages" ]
 }
 
 @test "a live scan-batch shows as scanning, and Stop drops the .stop file" {
@@ -222,7 +223,8 @@ ROWN="https://dash.example.ts.net:8445"
   [[ "${lines[0]}" == *"not scanning"* ]]
   run rpost /api/batches/batch-20261101-100000/reveal "$ROWN"
   [ "${lines[1]}" = "409" ]
-  [[ "${lines[0]}" == *"only from that Mac"* ]]
+  # A Mac server refuses a remote viewer; a Linux server has no Finder at all.
+  [[ "${lines[0]}" == *"only from that Mac"* || "${lines[0]}" == *"needs macOS"* ]]
   run rpost /api/reveal "$ROWN"
   [ "${lines[1]}" = "409" ]
 }
@@ -288,7 +290,8 @@ EOWN="https://scans.example.ca"
   [[ "${lines[0]}" == *"not scanning"* ]]
   run epost /api/batches/batch-20261101-100000/reveal "$EOWN"
   [ "${lines[1]}" = "409" ]
-  [[ "${lines[0]}" == *"only from that Mac"* ]]
+  # A Mac server refuses a remote viewer; a Linux server has no Finder at all.
+  [[ "${lines[0]}" == *"only from that Mac"* || "${lines[0]}" == *"needs macOS"* ]]
   run epost /api/reveal "$EOWN"
   [ "${lines[1]}" = "409" ]
 }

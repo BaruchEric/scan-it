@@ -94,7 +94,7 @@ valid_page() { [[ "$1" =~ ^[0-9]+$ ]] && (( $1 >= 1 && $1 <= npages )); }
 valid_rot() { [[ "$1" == 0 || "$1" == 90 || "$1" == 180 || "$1" == 270 ]]; }
 
 # Validate every line and normalize to the 6-field form before writing anything.
-workdir=$(mktemp -d -t checks-split)
+workdir=$(mktemp -d "${TMPDIR:-/tmp}/checks-split.XXXXXX")
 trap 'rm -rf "$workdir"' EXIT
 clean="$workdir/clean"
 : > "$clean"

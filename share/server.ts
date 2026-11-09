@@ -190,6 +190,12 @@ const STARTED = new Date().toISOString();
 const HOST = hostname().split(".")[0] ?? "unknown";
 const BROTHER_SERVER_DIR = "/Library/Printers/Brother/Utilities/Server";
 const BROTHER_SERVICES = ["LOGINserver", "USBserver", "NETserver"];
+const MAC = process.platform === "darwin";
+// Linux with the scanner on another machine: an ssh destination whose
+// forced-command key answers "status" (lsusb's Brother line, ipp-usb's state)
+// and "restart" (restarts ipp-usb). Unset, ipp-usb is looked for here.
+const SCANNER_HOST = process.env.SCAN_SCANNER_HOST || null;
+const SSH_QUICK = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5"];
 const ORIGINS = [`http://127.0.0.1:${OPTS.port}`, `http://localhost:${OPTS.port}`];
 const HOSTS = [`127.0.0.1:${OPTS.port}`, `localhost:${OPTS.port}`];
 
@@ -420,7 +426,9 @@ function overlayRestart(list: Scanner[], jobs: Job[]): Scanner[] {
     return {
       ...s,
       state: "restarting",
-      detail: "Restarting the Brother services. USBserver is back within seconds, NETserver about 30 s later.",
+      detail: MAC
+        ? "Restarting the Brother services. USBserver is back within seconds, NETserver about 30 s later."
+        : "Restarting ipp-usb. The scanner is back within a few seconds.",
       actions: [],
     };
   });
@@ -596,26 +604,39 @@ class RealBackend implements Backend {
   }
 
   private async probeAll(defs: ScannerDef[], busy: Set<string>): Promise<Map<string, Scanner>> {
-    const usb = await run(["ioreg", "-p", "IOUSB", "-w0"], 4000);
+    // USB devices on this machine: ioreg on macOS, lsusb on Linux.
+    const usb = await run(MAC ? ["ioreg", "-p", "IOUSB", "-w0"] : ["lsusb"], 4000);
+    const host = !MAC && SCANNER_HOST ? await run([...SSH_QUICK, SCANNER_HOST, "status"], 8000) : null;
     const results = await Promise.all(defs.map(async (d): Promise<Scanner> => {
       // Probing a scanner mid-batch would fight scan-batch for the device.
       if (busy.has(d.slug)) return this.cache.data.get(d.slug) ?? unknownScanner(d);
-      if (d.slug === "brother") return this.probeBrother(d, usb.out);
+      if (d.slug === "brother") return this.probeBrother(d, host ? host.out : usb.out, host);
       if (d.slug === "ix500") return this.probeIx500(d, usb.out);
       return unknownScanner(d);
     }));
     return new Map(results.map((s) => [s.slug, s]));
   }
 
-  private async probeBrother(d: ScannerDef, ioreg: string): Promise<Scanner> {
-    const ps = await run(["pgrep", "-fl", `${BROTHER_SERVER_DIR}/`], 3000);
-    // Match the executable path at the start of the command, not any process
-    // (a shell, a grep) whose arguments happen to mention it.
-    const procs = ps.out.split("\n").map((l) => l.replace(/^\d+ /, ""));
-    const services = BROTHER_SERVICES.map((name) => ({
-      name, running: procs.some((c) => c.startsWith(`${BROTHER_SERVER_DIR}/${name}.app/`)),
-    }));
-    const onUsb = /ADS-?4300|Brother/i.test(ioreg);
+  private async brotherServices(host: { code: number | null; out: string } | null): Promise<Service[]> {
+    if (MAC) {
+      const ps = await run(["pgrep", "-fl", `${BROTHER_SERVER_DIR}/`], 3000);
+      // Match the executable path at the start of the command, not any process
+      // (a shell, a grep) whose arguments happen to mention it.
+      const procs = ps.out.split("\n").map((l) => l.replace(/^\d+ /, ""));
+      return BROTHER_SERVICES.map((name) => ({
+        name, running: procs.some((c) => c.startsWith(`${BROTHER_SERVER_DIR}/${name}.app/`)),
+      }));
+    }
+    // Linux: ipp-usb serves the Brother's eSCL, on the scanner host or here.
+    if (host) return [{ name: "ipp-usb", running: /ipp-usb active/.test(host.out) }];
+    const st = await run(["systemctl", "is-active", "ipp-usb"], 3000);
+    return [{ name: "ipp-usb", running: st.out.trim() === "active" }];
+  }
+
+  private async probeBrother(d: ScannerDef, usbText: string, host: { code: number | null; out: string } | null): Promise<Scanner> {
+    const services = await this.brotherServices(host);
+    const onUsb = /ADS-?4300|Brother/i.test(usbText);
+    const where = host && SCANNER_HOST ? ` on ${SCANNER_HOST.replace(/^.*@/, "")}` : "";
     const st = await run([ESCL, "--status"], 9000);
     const m = /State=(\S+) Adf=(\S+) Endpoint=(\S+)/.exec(st.out);
     const base: Scanner = {
@@ -624,16 +645,24 @@ class RealBackend implements Backend {
       actions: ["diag", "restart-services"], checked: now(),
     };
     if (!m) {
+      if (host && host.code !== 0 && !host.out.trim()) {
+        return { ...base, state: "error",
+          detail: `Can't reach the scanner host ${SCANNER_HOST} to check the Brother. Run Diagnose.` };
+      }
       const down = services.filter((s) => !s.running).map((s) => s.name);
       if (down.length) {
         return { ...base, present: onUsb, state: "error",
-          detail: `The Brother services are not running (${down.join(", ")}), so the Mac can't reach the scanner. Restart them.` };
+          detail: MAC
+            ? `The Brother services are not running (${down.join(", ")}), so the Mac can't reach the scanner. Restart them.`
+            : `ipp-usb is not running${where}, so ${HOST} can't reach the scanner. Restart it.` };
       }
       if (onUsb) {
         return { ...base, present: true, state: "error",
-          detail: "On USB but not answering eSCL. Restart the Brother services, or run Diagnose." };
+          detail: MAC
+            ? "On USB but not answering eSCL. Restart the Brother services, or run Diagnose."
+            : `On USB${where} but not answering eSCL here. Restart ipp-usb, or run Diagnose.` };
       }
-      return { ...base, detail: "Not found. Check it is powered on and plugged in." };
+      return { ...base, detail: `Not found${where}. Check it is powered on and plugged in.` };
     }
     const [, pwg, adf, endpoint] = m;
     const local = /\/\/(localhost|127\.0\.0\.1)[:/]/.test(endpoint);
@@ -650,22 +679,23 @@ class RealBackend implements Backend {
         detail: paper === true ? "Ready. Paper is in the feeder." : paper === false ? "Ready. The feeder is empty." : "Ready." };
     }
     if (pwg === "Processing" || pwg === "Testing") {
-      return { ...s, state: "busy", paper, detail: "Busy with a job from another app (Image Capture?)." };
+      return { ...s, state: "busy", paper,
+        detail: MAC ? "Busy with a job from another app (Image Capture?)." : "Busy with a job from another app." };
     }
     return { ...s, state: "error", paper, detail: `The scanner reports ${pwg}. Power-cycle it, then run Diagnose.` };
   }
 
-  private async probeIx500(d: ScannerDef, ioreg: string): Promise<Scanner> {
+  private async probeIx500(d: ScannerDef, usbText: string): Promise<Scanner> {
     const base: Scanner = {
       slug: d.slug, model: d.model, where: d.where, present: false, connection: null,
-      state: "offline", detail: "Not connected to this Mac. It is USB only, and the lid is its power switch.",
+      state: "offline", detail: `Not connected to ${MAC ? "this Mac" : HOST}. It is USB only, and the lid is its power switch.`,
       paper: null, services: null, batch: null, actions: ["diag"], checked: now(),
     };
-    if (!/ScanSnap/i.test(ioreg)) return base;
+    if (!/ScanSnap|04c5:132b/i.test(usbText)) return base;
     const list = await run([SCANIMAGE, "-L"], 12000);
     const m = /`(fujitsu:ScanSnap iX500:[^']+)'/.exec(list.out) ?? /(fujitsu:ScanSnap iX500:\S+)/.exec(list.out);
     if (!m) {
-      const thief = await run(["pgrep", "-fil", "scansnap"], 3000);
+      const thief = MAC ? await run(["pgrep", "-fil", "scansnap"], 3000) : { out: "" };
       return { ...base, present: true, connection: "usb", state: "error",
         detail: thief.out.trim()
           ? "On USB, but ScanSnap software is running and holds the scanner. Quit it."
@@ -701,7 +731,8 @@ class RealBackend implements Backend {
   }
 
   discard(b: Batch): void {
-    const trash = join(HOME, ".Trash");
+    const trash = MAC ? join(HOME, ".Trash")
+      : join(process.env.XDG_DATA_HOME || join(HOME, ".local/share"), "Trash/files");
     mkdirSync(trash, { recursive: true });
     let target = join(trash, b.id);
     if (existsSync(target)) target = `${target}-${Date.now()}`;
@@ -715,6 +746,7 @@ class RealBackend implements Backend {
   }
 
   reveal(path: string): void {
+    if (!MAC) throw new HttpError(409, `Show in Finder needs macOS, and scan-it runs on ${HOST}.`);
     spawn("open", [path], { stdio: "ignore", detached: true }).unref();
   }
 
@@ -723,6 +755,15 @@ class RealBackend implements Backend {
   }
 
   restartBrother(): Job {
+    if (!MAC) {
+      this.invalidate();
+      // ipp-usb holds the USB side; restarting it re-opens the scanner.
+      const script = SCANNER_HOST
+        ? 'echo "Restarting ipp-usb on $1."; ssh -o BatchMode=yes -o ConnectTimeout=10 "$1" restart'
+        : 'echo "Restarting ipp-usb."; sudo -n systemctl restart ipp-usb && echo "ipp-usb $(systemctl is-active ipp-usb)"';
+      const cmd = BROTHER_RESTART ? [BROTHER_RESTART] : ["/bin/bash", "-c", script, "restart", SCANNER_HOST ?? ""];
+      return this.start("restart-services", "Restart ipp-usb", cmd);
+    }
     // Patterns are anchored to the executable path. Unanchored, pkill -f also
     // matched any shell whose arguments named a service, which is how a second
     // restart click killed the first restart's script.
@@ -760,7 +801,8 @@ class RealBackend implements Backend {
     try { stale = statSync(out).mtimeMs < statSync(src).mtimeMs; } catch { /* not made yet */ }
     if (stale) {
       mkdirSync(join(THUMBS, b.id), { recursive: true });
-      const r = await run(["sips", "-Z", "360", src, "--out", out], 15000);
+      const r = await run(MAC ? ["sips", "-Z", "360", src, "--out", out]
+        : ["magick", src, "-thumbnail", "360x360", out], 15000);
       if (r.code !== 0) return fileResponse(src, "image/jpeg");
     }
     return fileResponse(out, "image/jpeg");
@@ -1079,8 +1121,11 @@ async function page(remote: Remote | null): Promise<Response> {
     api: "/api", files: "/files/", token: TOKEN, started: STARTED, host: HOST,
     default_user: defaultUser(), mock: OPTS.mock, poll_ms: 3000,
     url: remote ? remote.url : `http://127.0.0.1:${OPTS.port}/`,
-    // Reveal opens Finder on this Mac, which a remote viewer can't see.
     remote: remote !== null,
+    platform: process.platform,
+    // Reveal opens Finder on this Mac, which a remote viewer can't see, and
+    // which a Linux host doesn't have.
+    can_reveal: MAC && remote === null,
   };
   const body = html
     .split("\n")
@@ -1216,6 +1261,7 @@ async function handle(req: Request, remote: Remote | null): Promise<Response> {
   const origins = remote ? [remote.origin] : ORIGINS;
   if (origin !== null && !origins.includes(origin)) throw new HttpError(403, "Cross-origin request refused.");
   const notRemote = (what: string) => {
+    if (!MAC) throw new HttpError(409, `${what} needs macOS, and scan-it runs on ${HOST}.`);
     if (remote) throw new HttpError(409, `${what} opens Finder on ${HOST}, so it works only from that Mac.`);
   };
   if (!tokenOk(req)) throw new HttpError(403, "Missing or stale token. Reload the page.", "token");
@@ -1273,14 +1319,14 @@ async function handle(req: Request, remote: Remote | null): Promise<Response> {
         const scanning = backend.batches().find((x) => x.state === "scanning" || x.state === "stopping");
         if (scanning) throw new HttpError(409, `${scanning.id} is scanning. Run Diagnose after it ends.`);
         const r = restartJob(backend.jobs());
-        if (r) throw new HttpError(409, `The Brother services are restarting (${r.id}). Run Diagnose when that job finishes.`);
+        if (r) throw new HttpError(409, `The Brother is restarting (${r.id}). Run Diagnose when that job finishes.`);
         return json({ job: backend.diag().id });
       }
       case "brother/restart": {
         const busy = backend.batches().find((x) => x.scanner === "brother" && (x.state === "scanning" || x.state === "stopping"));
         if (busy) throw new HttpError(409, `The Brother is scanning ${busy.id}. Stop it first.`);
         const r = restartJob(backend.jobs());
-        if (r) throw new HttpError(409, `The Brother services are already restarting (${r.id}). It takes about 30 s.`);
+        if (r) throw new HttpError(409, `The Brother is already restarting (${r.id}). It takes up to 30 s.`);
         return json({ job: backend.restartBrother().id });
       }
       case "dashboard/refresh": return json({ job: backend.refresh().id });

@@ -538,11 +538,16 @@ EOF
   page page-001.jpg RECEIPT
   page page-002.jpg BLANK
   receipt_manifest
+  # Every tool on PATH but ocrmypdf: on Linux it shares /usr/bin with the rest.
   mkdir -p "$TMP/toolbin"
-  for t in jq img2pdf jpegtran qpdf; do
-    ln -s "$(command -v "$t")" "$TMP/toolbin/$t"
+  IFS=: read -ra dirs <<<"$PATH"
+  for d in "${dirs[@]}"; do
+    for f in "$d"/*; do
+      n=${f##*/}
+      [[ -x "$f" && "$n" != ocrmypdf && ! -e "$TMP/toolbin/$n" ]] && ln -s "$f" "$TMP/toolbin/$n"
+    done
   done
-  run env PATH="$TMP/toolbin:/usr/bin:/bin" "$BATCH_FILE" -o "$OUT" "$STAGING"
+  run env PATH="$TMP/toolbin" "$BATCH_FILE" -o "$OUT" "$STAGING"
   [ "$status" -eq 0 ]
   [[ "$output" == *"skipping searchable text layers"* ]]
   [ -f "$OUT/$RECEIPT_REL.pdf" ]

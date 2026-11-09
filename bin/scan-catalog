@@ -41,12 +41,17 @@ Commands:
                               for a Cloudflare tunnel behind the beric.ca edge
                               gate, for the comma-separated gate emails only.
   serve --install [--port N] [--public-url URL --allow-login LOGINS]
-                  [--edge-url URL --edge-allow EMAILS [--edge-port N]] [--tunnel HOST]
-                              keep it running at login as a LaunchAgent
-                              (ca.beric.scan-it-dashboard). --tunnel adds a
-                              second one (ca.beric.scan-it-tunnel) running
-                              scan-tunnel HOST.
-  serve --uninstall           remove both LaunchAgents
+                  [--edge-url URL --edge-allow EMAILS [--edge-port N]]
+                  [--tunnel HOST [--tunnel-map LOCAL:REMOTE]...]
+                              keep it running: a LaunchAgent on macOS
+                              (ca.beric.scan-it-dashboard), a systemd user
+                              unit on Linux (scan-it-dashboard.service, env
+                              from ~/.config/scan-it/env). --tunnel adds a
+                              second one (ca.beric.scan-it-tunnel or
+                              scan-it-tunnel.service) running scan-tunnel
+                              HOST with each --tunnel-map (default: PORT on
+                              both ends).
+  serve --uninstall           remove both
 
 Workflows: $workflows
 Statuses:  $statuses
@@ -58,6 +63,12 @@ EOF
 }
 
 die() { echo "scan-catalog: $*" >&2; exit "${2:-1}"; }
+# open on macOS; xdg-open on a Linux desktop; otherwise just say where it is.
+open_path() {
+  if [[ "$(uname)" == Darwin ]]; then open "$1"
+  elif command -v xdg-open >/dev/null 2>&1 && [[ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]]; then xdg-open "$1" >/dev/null 2>&1 &
+  else echo "Open $1"; fi
+}
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -73,7 +84,7 @@ root="${root%/}"
 cmd="$1"; shift
 command -v jq >/dev/null 2>&1 || die "jq not found"
 
-tmp=$(mktemp -d -t scan-catalog)
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/scan-catalog.XXXXXX")
 trap 'rm -rf "$tmp"' EXIT
 
 # One JSON line per sidecar: {path, d}. Unreadable files are skipped loudly.
@@ -242,10 +253,10 @@ case "$cmd" in
       render "$tmp/$ent.json" "$root/$ent/dashboard.html"
       echo "$root/$ent/dashboard.html"
     done < <(jq -r '[(.documents[], .paychecks[]) | .entity // empty] | unique[]' "$tmp/all.json")
-    if (( open_it )); then open "$root/dashboard.html"; fi ;;
+    if (( open_it )); then open_path "$root/dashboard.html"; fi ;;
 
   serve)
-    port=7820 server_args=() remote_args=() agent="" tunnel=""
+    port=7820 server_args=() remote_args=() agent="" tunnel="" tunnel_maps=()
     while [[ $# -gt 0 ]]; do
       case "$1" in
         --port)
@@ -258,12 +269,92 @@ case "$cmd" in
         --tunnel)
           [[ $# -ge 2 && -n "$2" ]] || die "--tunnel requires an ssh host" 64
           tunnel="$2"; shift 2 ;;
+        --tunnel-map)
+          [[ $# -ge 2 && "$2" =~ ^[0-9]+(:[0-9]+)?$ ]] || die "--tunnel-map requires LOCAL[:REMOTE] ports" 64
+          tunnel_maps+=("$2"); shift 2 ;;
         --install|--uninstall) agent="${1#--}"; shift ;;
         *) die "serve: unknown argument: $1" 64 ;;
       esac
     done
     [[ -z "$tunnel" || "$agent" == install ]] || die "--tunnel goes with --install" 64
+    [[ ${#tunnel_maps[@]} -eq 0 || -n "$tunnel" ]] || die "--tunnel-map goes with --tunnel" 64
+    [[ ${#tunnel_maps[@]} -gt 0 ]] || tunnel_maps=("$port")
     url="http://127.0.0.1:$port/"
+    bun_dir=$(dirname "$(command -v bun 2>/dev/null || echo "$HOME/.bun/bin/bun")")
+    wait_up() {  # wait_up <where the log is>
+      for _ in $(seq 1 50); do
+        curl -fsS --max-time 1 "${url}api/ping" >/dev/null 2>&1 && return 0
+        sleep 0.2
+      done
+      die "the service started but nothing answers on $url (log: $1)"
+    }
+    if [[ -n "$agent" && "$(uname)" != Darwin ]]; then
+      # Linux: systemd user units. Linger keeps them running without a login.
+      export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+      unit_dir="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
+      svc="scan-it-dashboard.service" tsvc="scan-it-tunnel.service"
+      if [[ "$agent" == uninstall ]]; then
+        systemctl --user disable --now "$svc" "$tsvc" 2>/dev/null || true
+        rm -f "$unit_dir/$svc" "$unit_dir/$tsvc"
+        systemctl --user daemon-reload
+        echo "Removed the $svc and $tsvc user units."
+        exit 0
+      fi
+      # One argument per systemd word: quoted, with \ " % $ escaped.
+      sdq() { local a="${1//\\/\\\\}"; a="${a//\"/\\\"}"; a="${a//%/%%}"; a="${a//\$/\$\$}"; printf '"%s"' "$a"; }
+      exec_line=$(sdq /bin/bash)
+      for a in "$script_dir/scan-catalog" -r "$root" serve --no-open --port "$port" \
+               ${remote_args[@]+"${remote_args[@]}"}; do
+        exec_line+=" $(sdq "$a")"
+      done
+      mkdir -p "$unit_dir" "${XDG_CONFIG_HOME:-$HOME/.config}/scan-it"
+      cat > "$unit_dir/$svc" <<UNIT
+# Written by scan-catalog serve --install. Remove with scan-catalog serve --uninstall.
+[Unit]
+Description=scan-it live dashboard (scan-catalog serve) on $url
+After=network-online.target
+
+[Service]
+EnvironmentFile=-%h/.config/scan-it/env
+Environment=$(sdq "PATH=$bun_dir:$HOME/bin:/usr/local/bin:/usr/bin:/bin")
+ExecStart=$exec_line
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target
+UNIT
+      systemctl --user daemon-reload
+      systemctl --user enable "$svc" >/dev/null 2>&1
+      systemctl --user restart "$svc"
+      wait_up "journalctl --user -u $svc"
+      echo "Live dashboard runs as the user unit $svc: $url"
+      echo "  $unit_dir/$svc, log: journalctl --user -u $svc"
+      if [[ -n "$tunnel" ]]; then
+        exec_line="$(sdq /bin/bash) $(sdq "$script_dir/scan-tunnel") $(sdq "$tunnel")"
+        for m in "${tunnel_maps[@]}"; do exec_line+=" $(sdq "$m")"; done
+        cat > "$unit_dir/$tsvc" <<UNIT
+# Written by scan-catalog serve --install --tunnel. Remove with scan-catalog serve --uninstall.
+[Unit]
+Description=scan-it reverse tunnel to $tunnel (${tunnel_maps[*]})
+After=network-online.target
+
+[Service]
+EnvironmentFile=-%h/.config/scan-it/env
+ExecStart=$exec_line
+Restart=always
+RestartSec=15
+
+[Install]
+WantedBy=default.target
+UNIT
+        systemctl --user daemon-reload
+        systemctl --user enable "$tsvc" >/dev/null 2>&1
+        systemctl --user restart "$tsvc"
+        echo "Tunnel to $tunnel runs as the user unit $tsvc, log: journalctl --user -u $tsvc"
+      fi
+      exit 0
+    fi
     label="ca.beric.scan-it-dashboard"
     plist="$HOME/Library/LaunchAgents/$label.plist"
     tlabel="ca.beric.scan-it-tunnel"
@@ -282,7 +373,6 @@ case "$cmd" in
       for a in ${remote_args[@]+"${remote_args[@]}"}; do
         extra+="        <string>$(xml "$a")</string>"$'\n'
       done
-      bun_dir=$(dirname "$(command -v bun 2>/dev/null || echo "$HOME/.bun/bin/bun")")
       mkdir -p "$HOME/Library/LaunchAgents" "$HOME/Library/Logs"
       cat > "$plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -324,15 +414,12 @@ PLIST
       plutil -lint "$plist" >/dev/null || die "wrote an invalid plist: $plist"
       launchctl bootout "gui/$(id -u)/$label" 2>/dev/null || true
       launchctl bootstrap "gui/$(id -u)" "$plist" || die "launchctl bootstrap failed for $plist"
-      for _ in $(seq 1 50); do
-        curl -fsS --max-time 1 "${url}api/ping" >/dev/null 2>&1 && break
-        sleep 0.2
-      done
-      curl -fsS --max-time 1 "${url}api/ping" >/dev/null 2>&1 \
-        || die "the LaunchAgent started but nothing answers on $url (log: ~/Library/Logs/scan-it-dashboard.log)"
+      wait_up "~/Library/Logs/scan-it-dashboard.log"
       echo "Live dashboard runs at login: $url"
       echo "  LaunchAgent $plist, log ~/Library/Logs/scan-it-dashboard.log"
       if [[ -n "$tunnel" ]]; then
+        maps=""
+        for m in "${tunnel_maps[@]}"; do maps+="        <string>$m</string>"$'\n'; done
         cat > "$tplist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -346,8 +433,7 @@ PLIST
         <string>/bin/bash</string>
         <string>$(xml "$script_dir/scan-tunnel")</string>
         <string>$(xml "$tunnel")</string>
-        <string>$port</string>
-    </array>
+${maps}    </array>
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>
@@ -371,7 +457,7 @@ PLIST
     # Already running on that port: just open it.
     if curl -fsS --max-time 1 "${url}api/ping" 2>/dev/null | grep -q '"app":"scan-it"'; then
       echo "scan-it live dashboard already running: $url"
-      [[ " ${server_args[*]:-} " == *" --no-open "* ]] || open "$url"
+      [[ " ${server_args[*]:-} " == *" --no-open "* ]] || open_path "$url"
       exit 0
     fi
     bun_bin=$(command -v bun 2>/dev/null || echo "$HOME/.bun/bin/bun")

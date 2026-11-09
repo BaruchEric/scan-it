@@ -202,7 +202,7 @@ filing_host=$(hostname -s 2>/dev/null || echo unknown)
 safe_name() { printf '%s' "$1" | tr -c 'A-Za-z0-9._-' '-'; }
 index_file="$outdir/_index/$(safe_name "$scan_user")@$(safe_name "$filing_host").jsonl"
 
-workdir=$(mktemp -d -t batch-file)
+workdir=$(mktemp -d "${TMPDIR:-/tmp}/batch-file.XXXXXX")
 # The staging dir may be gone by exit (full success removes it).
 trap 'rm -rf "$workdir"; rmdir "$staging/.filing" 2>/dev/null || true' EXIT
 

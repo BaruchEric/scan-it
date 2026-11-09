@@ -13,6 +13,26 @@ Open-source ScanSnap iX500 document-scanning stack for macOS: SANE-driven bash C
 - **Live dashboard:** `scan-catalog serve` runs a local server on http://127.0.0.1:7820/ with scanner status, batches in progress, and buttons that run the tools (scan, stop, resume, file, diagnose, restart the Brother services).
 - **Run and deploy:** `bun run dev` serves the dashboard with mock scanners on http://127.0.0.1:7830/ and restarts on edits; `bun run deploy` puts this checkout live at https://scans.beric.ca and on the tailnet. See "Run locally and deploy".
 - **Diagnose:** `scan-diag` runs every dependency check and prints pass/fail with a fix hint per failure.
+- **Where it runs (since 2026-11-09):** the Brother is on USB at the Proxmox host `pve`, and scan-it runs in CT 150 `scan-it` there. See "Scan host: CT 150 on pve". The macOS path below still works on a Mac with the scanner attached.
+
+## Scan host: CT 150 on pve
+
+```
+Brother ADS-4300N ──USB──> pve (192.168.1.12): ipp-usb, eSCL on localhost:60000 (loopback only)
+   ──ssh -L (scan-it-escl.service)──> CT 150 scan-it (192.168.1.71, DHCP): localhost:60000
+CT 150: scan-it-dashboard (127.0.0.1:7820 main, :7821 edge), user eric, ~/scan-it
+   ──ssh -R (scan-it-tunnel)──> mini 127.0.0.1:7822 <── tailscale serve :8445
+                               mini 127.0.0.1:7823 <── beric-mini Cloudflare tunnel <── scans.beric.ca
+CT 150 ~/My Drive ──scan-mirror (rsync)──> NAS Backups/scan-it/mirror ──push (rclone)──> Google Drive
+```
+
+- **Container:** Debian 13, unprivileged, 2 cores, 2 GB, 32 GB on `ssd-thin`, starts at boot. Packages: img2pdf, qpdf, imagemagick, poppler-utils, jq, ocrmypdf + tesseract, libjpeg-turbo-progs, bats, rsync, bun 1.4.4 in `/usr/local/bin`.
+- **Settings:** `~/.config/scan-it/env` (plain `KEY=value`; the user units load it, and `~/.profile` and `~/.bashrc` export it): `ESCL_SCAN_ENDPOINT=http://localhost:60000/eSCL`, `SCAN_SCANNER_HOST=root@192.168.1.12`, `SCAN_TUNNEL_FREE=command`, `SCAN_MIRROR_HOST=nas-scan-it`.
+- **Units:** `scan-it-escl.service` (system, runs as eric) holds the eSCL forward. `scan-it-dashboard.service` and `scan-it-tunnel.service` are user units written by `scan-catalog serve --install`; linger keeps them up. Logs: `journalctl --user -u scan-it-dashboard`.
+- **Keys:** CT 150's `eric` key is pinned to a forced command at each end. On pve (`/usr/local/sbin/scan-it-host`) it runs `status` and `restart` for ipp-usb and may forward only to `localhost:60000`. On the mini (`~/.local/bin/scan-it-tunnel-gate`) it may listen only on 127.0.0.1:7822 and :7823, and its one command frees those ports. On the NAS (`Backups/scan-it/receiver.sh`) it uploads into `mirror/` by rsync (no delete, no download) and runs `push` and `status`. All three accept it only from 192.168.1.0/24.
+- **ipp-usb** needs `Host: localhost`: a request to `127.0.0.1:60000` gets a 302 to `localhost`.
+- **Filing root:** local, `~/My Drive/scans`, so the defaults need no `SCAN_ROOT`. Drive gets a copy through `scan-mirror`: rsync to the NAS, then the NAS's `push` runs `rclone copy` into the `gdrive-scans` remote. Neither step deletes, so a file moved or removed here stays where it was in Drive. `push` refuses until `Backups/scan-it/imported` exists on the NAS, because the first push would replace Drive's `dashboard.html` files with a catalog missing everything filed before the move.
+- **Not on Linux:** Show in Finder and Open scans folder (hidden), and the Push Scan Tool checks (`scan-diag` and the dashboard check ipp-usb on pve instead). Restart on the Brother card restarts ipp-usb on pve.
 
 ## Overview
 
@@ -108,7 +128,8 @@ All live in `bin/` and are symlinked onto `PATH`.
 | `scan-batch` | Continuously scan a heterogeneous stack in chunks (paper sensor auto-resumes between chunks; press Enter or wait for `--idle` seconds to end). Pages accumulate as per-page JPEGs in a timestamped staging dir. Exit codes: `0` success · `1` no scanner / device lost / jam · `2` no pages · `64` usage · `66` bad `--resume` dir · `130` interrupted. |
 | `batch-file` | Validate, rotate, merge, rename, and file the staged pages produced by `scan-batch`, driven by `<staging>/manifest.json`. Writes nothing unless every scanned page is accounted for exactly once and every document has an entity. Files entity first, writes sidecars (fields, OCR text, scanner/user provenance, follow-ups), runs the Drive copies `entities.json` maps, writes paydate check reports, appends the per-filer index, refreshes the dashboards. `--no-text-layer`, `--no-dashboard`, `--keep-staging`, `--drive-root DIR`, `-o DIR`. Exit codes: `0` success · `1` validation failure · `2` assembly failure · `64` usage · `66` not a staging dir. |
 | `scan-catalog` | Read side of the filing tree. `build [--entity SLUG]` prints the merged catalog (no OCR text); `pending [WORKFLOW] [--json]` lists open follow-ups (`copy`, `quickbooks`, `calendar`, `vault`, `check_report`); `mark <file> <workflow> <status>` records an outcome in the sidecar; `dashboard [--open]` renders `share/dashboard.html` into the root and each entity folder; `serve [--port N] [--no-open] [--mock] [--public-url URL --allow-login LOGINS] [--edge-url URL --edge-allow EMAILS [--edge-port N]]` runs the live dashboard (see below). |
-| `scan-tunnel` | `scan-tunnel HOST [PORT]`: reverse SSH tunnel that puts the live dashboard on HOST's loopback for `tailscale serve` there. Frees a port a dead session still holds, then runs `ssh -N -R` in the foreground. `scan-catalog serve --install --tunnel HOST` runs it at login. |
+| `scan-tunnel` | `scan-tunnel HOST [LOCAL[:REMOTE]]...`: reverse SSH tunnels that put the live dashboard's listeners on HOST's loopback, for `tailscale serve` or a Cloudflare tunnel there. Frees ports a dead session still holds (`SCAN_TUNNEL_FREE=command` when HOST pins the key to a forced command), then runs `ssh -N -R` in the foreground. `scan-catalog serve --install --tunnel HOST [--tunnel-map L:R]...` keeps it running. |
+| `scan-mirror` | Copy the local filing tree to Google Drive through the NAS: rsync to its mirror, then its `push` (rclone copy). Never deletes. `--rsync-only`, `--status`. Needs `SCAN_MIRROR_HOST`. |
 | `scan-organize` | Split an already-scanned PDF into per-document PDFs from a plan JSON (python3 stdlib); moves the source into `_originals/`. |
 | `escl-scan` | Direct eSCL client for the Brother ADS-4300N through the Push Scan Tool's localhost bridge. Runs `jpeg-check --repair` on each page as it lands and lists damaged pages in `<outdir>/.damaged` (`ESCL_SCAN_CHECK=0` turns that off). |
 | `jpeg-check` | `jpeg-check [--repair] FILE...` (bun). Reads a scanner JPEG's restart markers without decoding: `ok`; `truncated` (the paper ended before the requested height, which the Brother still declares; `--repair` crops it losslessly with jpegtran); `damaged` (the marker sequence skips, so rows are missing mid-page: rescan); `unknown` (no markers, left alone). Exit codes: `0` nothing damaged · `4` a damaged file · `1` unreadable or crop failed · `64` usage. |
@@ -178,12 +199,12 @@ The server never listens on the network. Two routes reach it, and `bun run deplo
 
 | URL | Path | Who gets in |
 |---|---|---|
-| https://scans.beric.ca | beric.ca edge gate (Cloudflare Worker), then the `beric-mac` Cloudflare tunnel on this Mac to the edge listener, 127.0.0.1:7821 | the beric.ca sign-ins in `--edge-allow`: Eric, Elsa, Ariel and Jose (the deploy default) |
-| https://macmini-2018.tail2d2c60.ts.net:8445 | `tailscale serve` on the mini, then a reverse SSH tunnel to 127.0.0.1:7820 | the tailnet logins in `--allow-login` (baruchhub@gmail.com) |
+| https://scans.beric.ca | beric.ca edge gate (Cloudflare Worker), then the `beric-mini` Cloudflare tunnel to the mini's 127.0.0.1:7823, then a reverse SSH tunnel to the edge listener, 127.0.0.1:7821 on CT 150 | the beric.ca sign-ins in `--edge-allow`: Eric, Elsa, Ariel and Jose (the deploy default) |
+| https://macmini-2018.tail2d2c60.ts.net:8445 | `tailscale serve` on the mini to 127.0.0.1:7822, then a reverse SSH tunnel to 127.0.0.1:7820 on CT 150 | the tailnet logins in `--allow-login` (baruchhub@gmail.com) |
 
 Each listener trusts one identity header and ignores the other. The edge Worker deletes any `X-Gate-*` header a caller sends and sets `X-Gate-User` from the gate's own check, so the edge listener reads only that one. It serves only the `--edge-url` Host, so a request through Cloudflare can't claim a tailnet login. The main port never reads `X-Gate-User`, because `tailscale serve` passes it through untouched. The gate alone admits every full-access beric.ca account; `--edge-allow` is the list the dashboard itself accepts, so an account added to the gate later stays out until it is added here too. The 403 names the identity that arrived, which helps when a trusted-device session shows up as `tailnet:<device>` instead of an email.
 
-The scans.beric.ca side lives in the homelab repo: the ingress rule in `services/tunnels/mac/config.yml` (`launchctl kickstart -k gui/$UID/ca.beric.beric-mac-tunnel` after an edit), the DNS route from `bun run tunnel route beric-mac scans.beric.ca`, and the offline-page label in `services/beric-gate/edge/hosts.ts`. While the Mac sleeps, the Worker answers with its "Eric's MacBook Pro is asleep or offline" page.
+The scans.beric.ca side lives in the homelab repo: the ingress rule in `services/tunnels/mini/config.yml` (copied to `/opt/stacks/tunnel/config.yml` on the mini, then `docker restart beric-mini-tunnel`), the DNS route from `bun run tunnel route beric-mini scans.beric.ca`, and the offline-page label in `services/beric-gate/edge/hosts.ts`. Until 2026-11-09 it ran from the Mac through `beric-mac`.
 
 The tailnet route by hand: publish it with `tailscale serve` on a machine that is always on, and carry it there over a reverse SSH tunnel:
 
@@ -211,10 +232,10 @@ The static `dashboard.html` copies in Drive keep their no-network CSP. Their liv
 | `bun run start` | `scan-catalog serve`: the real server on 7820, or the running LaunchAgent's page if it is already up. |
 | `bun run typecheck` | strict `tsc` over `share/server.ts`. |
 | `bun run test` | every bats suite (`bats test/`). Not `bun test`, which is bun's own runner. |
-| `bun run deploy` | `scripts/deploy.sh`: typecheck and `test/serve.bats`, then `scan-catalog serve --install` with both routes and `--tunnel macmini-ts`, which restarts the server on this checkout. Then it checks the edge listener (allowed and refused), the reverse tunnel from the mini, and that scans.beric.ca answers 401 signed out. `SCAN_DEPLOY_*` variables override the URLs, logins, ports and tunnel host; `SCAN_DEPLOY_SKIP_CHECKS=1` skips the tests. |
+| `bun run deploy` | `scripts/deploy.sh`: copies this checkout to CT 150 as `~/scan-it.new`, runs the typecheck and `test/serve.bats` there, swaps it in as `~/scan-it`, then `scan-catalog serve --install` with both routes and `--tunnel mini --tunnel-map 7820:7822 --tunnel-map 7821:7823`. Then it checks the edge listener (allowed and refused), both reverse tunnels from the mini, and that scans.beric.ca answers 401 signed out. It reaches CT 150 through `SCAN_DEPLOY_JUMP` (default `macmini-ts`; `mini-host` from a canopy container, with `SCAN_DEPLOY_MINI=mini-host`). Other `SCAN_DEPLOY_*` variables override the target, URLs, logins and ports; `SCAN_DEPLOY_SKIP_CHECKS=1` skips the tests. |
 | `bun run logs` | follow the server and tunnel logs. |
 
-The server runs from this checkout in place, so a deploy is a restart, not a copy.
+The server runs from the copy in CT 150's `~/scan-it` (its `REVISION` file names the commit), so a deploy is a copy plus a restart.
 
 ### Repo layout
 
