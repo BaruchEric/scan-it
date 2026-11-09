@@ -129,6 +129,8 @@ function parseArgs(argv: string[]) {
     port: 7820,
     open: true,
     mock: process.env.SCAN_SERVE_MOCK === "1",
+    publicUrl: process.env.SCAN_SERVE_PUBLIC_URL || null,
+    allowLogins: (process.env.SCAN_SERVE_ALLOW_LOGINS ?? "").split(","),
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -148,8 +150,11 @@ function parseArgs(argv: string[]) {
       }
       case "--no-open": opts.open = false; break;
       case "--mock": opts.mock = true; break;
+      case "--public-url": opts.publicUrl = val(); break;
+      case "--allow-login": opts.allowLogins.push(...val().split(",")); break;
       case "-h": case "--help":
-        console.log("Usage: bun server.ts [--root DIR] [--staging DIR] [--port N] [--no-open] [--mock]");
+        console.log("Usage: bun server.ts [--root DIR] [--staging DIR] [--port N] [--no-open] [--mock]\n" +
+          "                     [--public-url URL --allow-login LOGIN[,LOGIN]]");
         process.exit(0);
       default: fatal(`unknown argument: ${a}`, 64);
     }
@@ -177,6 +182,26 @@ const BROTHER_SERVER_DIR = "/Library/Printers/Brother/Utilities/Server";
 const BROTHER_SERVICES = ["LOGINserver", "USBserver", "NETserver"];
 const ORIGINS = [`http://127.0.0.1:${OPTS.port}`, `http://localhost:${OPTS.port}`];
 const HOSTS = [`127.0.0.1:${OPTS.port}`, `localhost:${OPTS.port}`];
+
+/**
+ * Remote access: tailscale serve on another machine proxies its HTTPS URL to
+ * this port through a reverse SSH tunnel (bin/scan-tunnel). Requests for that
+ * URL keep its Host, and serve stamps Tailscale-User-Login with the signed-in
+ * tailnet user, replacing any copy the client sent. Tagged nodes get none. The
+ * login is the gate: the page hands its token to whoever can load it.
+ */
+interface Remote { url: string; host: string; origin: string; logins: string[] }
+
+function remoteConfig(): Remote | null {
+  if (OPTS.publicUrl === null) return null;
+  let u: URL;
+  try { u = new URL(OPTS.publicUrl); } catch { fatal(`--public-url is not a URL: ${OPTS.publicUrl}`, 64); }
+  if (u.protocol !== "https:" && u.protocol !== "http:") fatal("--public-url must be http(s)", 64);
+  const logins = OPTS.allowLogins.map((l) => l.trim().toLowerCase()).filter((l) => l !== "");
+  if (!logins.length) fatal("--public-url needs --allow-login: the tailnet logins that may use it", 64);
+  return { url: `${u.origin}/`, host: u.host, origin: u.origin, logins };
+}
+const REMOTE = remoteConfig();
 
 const CHILD_ENV: Record<string, string> = {
   ...Object.fromEntries(Object.entries(process.env).filter((e): e is [string, string] => e[1] !== undefined)),
@@ -1012,7 +1037,7 @@ async function buildCatalog(): Promise<unknown> {
 /** JSON safe inside a <script> block: every "<" escaped, as scan-catalog does. */
 const scriptJson = (v: unknown) => JSON.stringify(v).replace(/</g, "\\u003c");
 
-async function page(): Promise<Response> {
+async function page(remote: boolean): Promise<Response> {
   let html: string;
   try { html = readFileSync(TEMPLATE, "utf8"); } catch {
     return new Response(`Dashboard template missing: ${TEMPLATE}`, { status: 500 });
@@ -1021,7 +1046,9 @@ async function page(): Promise<Response> {
   const live = {
     api: "/api", files: "/files/", token: TOKEN, started: STARTED, host: HOST,
     default_user: defaultUser(), mock: OPTS.mock, poll_ms: 3000,
-    url: `http://127.0.0.1:${OPTS.port}/`,
+    url: remote && REMOTE ? REMOTE.url : `http://127.0.0.1:${OPTS.port}/`,
+    // Reveal opens Finder on this Mac, which a remote viewer can't see.
+    remote,
   };
   const body = html
     .split("\n")
@@ -1091,10 +1118,17 @@ async function handle(req: Request): Promise<Response> {
   const url = new URL(req.url);
   const path = url.pathname;
   const host = req.headers.get("host") ?? "";
-  if (!HOSTS.includes(host)) return new Response("Wrong host.", { status: 421 });
+  const remote = REMOTE !== null && host === REMOTE.host;
+  if (!remote && !HOSTS.includes(host)) return new Response("Wrong host.", { status: 421 });
+  if (remote) {
+    const login = (req.headers.get("tailscale-user-login") ?? "").toLowerCase();
+    if (!REMOTE.logins.includes(login)) {
+      return new Response("This dashboard is limited to its owner's tailnet login.", { status: 403 });
+    }
+  }
 
   if (req.method === "GET") {
-    if (path === "/" || path === "/index.html") return page();
+    if (path === "/" || path === "/index.html") return page(remote);
     if (path === "/api/ping") return json({ app: "scan-it", root: ROOT, started: STARTED, mock: OPTS.mock });
     if (path === "/api/status") return json(await status());
     let m = /^\/api\/jobs\/([A-Za-z0-9]+)$/.exec(path);
@@ -1124,7 +1158,11 @@ async function handle(req: Request): Promise<Response> {
 
   if (req.method !== "POST") throw new HttpError(405, "Method not allowed.");
   const origin = req.headers.get("origin");
-  if (origin !== null && !ORIGINS.includes(origin)) throw new HttpError(403, "Cross-origin request refused.");
+  const origins = remote && REMOTE ? [REMOTE.origin] : ORIGINS;
+  if (origin !== null && !origins.includes(origin)) throw new HttpError(403, "Cross-origin request refused.");
+  const notRemote = (what: string) => {
+    if (remote) throw new HttpError(409, `${what} opens Finder on ${HOST}, so it works only from that Mac.`);
+  };
   if (!tokenOk(req)) throw new HttpError(403, "Missing or stale token. Reload the page.");
   const b = await body(req);
 
@@ -1167,6 +1205,7 @@ async function handle(req: Request): Promise<Response> {
         backend.discard(batch);
         return json({ ok: true });
       case "reveal":
+        notRemote("Show in Finder");
         backend.reveal(batch.dir);
         return json({ ok: true });
     }
@@ -1191,6 +1230,7 @@ async function handle(req: Request): Promise<Response> {
       }
       case "dashboard/refresh": return json({ job: backend.refresh().id });
       case "reveal":
+        notRemote("Open scans folder");
         backend.reveal(ROOT);
         return json({ ok: true });
     }
@@ -1221,6 +1261,7 @@ try {
 const url = `http://127.0.0.1:${server.port}/`;
 console.log(`scan-it live dashboard: ${url}${OPTS.mock ? "  (mock data)" : ""}`);
 console.log(`  filing root: ${ROOT}`);
+if (REMOTE) console.log(`  remote:      ${REMOTE.url} for ${REMOTE.logins.join(", ")}`);
 console.log(`  staging:     ${STAGING}`);
 console.log("  Ctrl-C stops the server. Scans and filing jobs it started keep running.");
 if (OPTS.open) spawn("open", [url], { stdio: "ignore", detached: true }).unref();

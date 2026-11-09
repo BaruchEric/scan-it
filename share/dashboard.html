@@ -2152,7 +2152,8 @@ details.checks li { display: grid; grid-template-columns: 4.5em minmax(0, 1fr) a
     }
 
     BATCH_ACTIONS.forEach(function (a) {
-      var ok = allowed(b, a[0]);
+      /* Show in Finder opens Finder on the server's Mac, out of a remote viewer's sight. */
+      var ok = allowed(b, a[0]) && !(a[0] === 'reveal' && LIVE.remote);
       var btn = v.btn[a[0]];
       if (a[0] === 'discard') {
         if (!ok) v.confirm.hidden = true;
@@ -2238,6 +2239,7 @@ details.checks li { display: grid; grid-template-columns: 4.5em minmax(0, 1fr) a
       banner.hidden = true;
     }
     $('desk-refresh').disabled = live.frozen || !!live.busy.refresh;
+    $('desk-reveal').hidden = !!LIVE.remote;
     $('desk-reveal').disabled = live.frozen || !!live.busy.revealRoot;
     $('devs').hidden = !st;
     $('batches').hidden = !st;

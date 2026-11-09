@@ -89,7 +89,7 @@ scan2pdf taxes                        # raw one-off → ~/My Drive/scans/_inbox/
 - **Registries in the filing root:** `entities.json` (slug, legal name, kind, aliases, notes, `"quickbooks": true`, and `"copies": {"tax": "8328 De Soto Ave/Tax/{year}/Tax Supporting Docs"}` paths relative to the Drive root, `SCAN_DRIVE_ROOT`, default the filing root's parent) and `profiles.json` (users with login accounts, scanners, and per user+scanner profiles carrying a `default_entity`).
 - **Scan defaults:** duplex, color, 300 dpi; flip with `-s` (simplex), `-g` (gray), `-r N` (dpi).
 - **`scan-batch` env vars:** `SCAN_BATCH_SCANIMAGE` (path to `scanimage`), `SCAN_BATCH_POLL_SECS` (paper-sensor poll interval, default 2), plus `--idle N` (end batch after N idle seconds, default 60).
-- **Live server:** `scan-catalog serve --install` keeps it running at login as the LaunchAgent `ca.beric.scan-it-dashboard` (log `~/Library/Logs/scan-it-dashboard.log`; `--uninstall` removes it). Run by hand: `scan-catalog serve --port N` (default 7820), `--no-open`, `--mock` (or `SCAN_SERVE_MOCK=1`: simulated scanners, batches and jobs). It honors `SCAN_ROOT`, `SCAN_STAGING`, `SCAN_DASHBOARD_TEMPLATE`, `SCAN_BATCH_ESCL` and `SCAN_BATCH_SCANIMAGE`. Job logs go to `<staging>/.logs/`, page thumbnails to `<staging>/.thumbs/`.
+- **Live server:** `scan-catalog serve --install` keeps it running at login as the LaunchAgent `ca.beric.scan-it-dashboard` (log `~/Library/Logs/scan-it-dashboard.log`; `--uninstall` removes it and the tunnel agent). For other devices see "Reaching it from other devices" below. Run by hand: `scan-catalog serve --port N` (default 7820), `--no-open`, `--mock` (or `SCAN_SERVE_MOCK=1`: simulated scanners, batches and jobs). It honors `SCAN_ROOT`, `SCAN_STAGING`, `SCAN_DASHBOARD_TEMPLATE`, `SCAN_BATCH_ESCL` and `SCAN_BATCH_SCANIMAGE`. Job logs go to `<staging>/.logs/`, page thumbnails to `<staging>/.thumbs/`.
 - **Who and what:** `scan-batch --user <slug>` (or `SCAN_USER`, or an account match in `profiles.json`) and the detected scanner go into `batch.json` and from there into every sidecar.
 
 ## Scripts / commands
@@ -106,7 +106,8 @@ All live in `bin/` and are symlinked onto `PATH`.
 | `scan-diag` | Diagnostics for the iX500 + SANE stack — colored pass/fail summary with a fix hint per failure. Read-only; safe to run any time. |
 | `scan-batch` | Continuously scan a heterogeneous stack in chunks (paper sensor auto-resumes between chunks; press Enter or wait for `--idle` seconds to end). Pages accumulate as per-page JPEGs in a timestamped staging dir. Exit codes: `0` success · `1` no scanner / device lost / jam · `2` no pages · `64` usage · `66` bad `--resume` dir · `130` interrupted. |
 | `batch-file` | Validate, rotate, merge, rename, and file the staged pages produced by `scan-batch`, driven by `<staging>/manifest.json`. Writes nothing unless every scanned page is accounted for exactly once and every document has an entity. Files entity first, writes sidecars (fields, OCR text, scanner/user provenance, follow-ups), runs the Drive copies `entities.json` maps, writes paydate check reports, appends the per-filer index, refreshes the dashboards. `--no-text-layer`, `--no-dashboard`, `--keep-staging`, `--drive-root DIR`, `-o DIR`. Exit codes: `0` success · `1` validation failure · `2` assembly failure · `64` usage · `66` not a staging dir. |
-| `scan-catalog` | Read side of the filing tree. `build [--entity SLUG]` prints the merged catalog (no OCR text); `pending [WORKFLOW] [--json]` lists open follow-ups (`copy`, `quickbooks`, `calendar`, `vault`, `check_report`); `mark <file> <workflow> <status>` records an outcome in the sidecar; `dashboard [--open]` renders `share/dashboard.html` into the root and each entity folder; `serve [--port N] [--no-open] [--mock]` runs the live dashboard (see below). |
+| `scan-catalog` | Read side of the filing tree. `build [--entity SLUG]` prints the merged catalog (no OCR text); `pending [WORKFLOW] [--json]` lists open follow-ups (`copy`, `quickbooks`, `calendar`, `vault`, `check_report`); `mark <file> <workflow> <status>` records an outcome in the sidecar; `dashboard [--open]` renders `share/dashboard.html` into the root and each entity folder; `serve [--port N] [--no-open] [--mock] [--public-url URL --allow-login LOGINS]` runs the live dashboard (see below). |
+| `scan-tunnel` | `scan-tunnel HOST [PORT]`: reverse SSH tunnel that puts the live dashboard on HOST's loopback for `tailscale serve` there. Frees a port a dead session still holds, then runs `ssh -N -R` in the foreground. `scan-catalog serve --install --tunnel HOST` runs it at login. |
 | `scan-organize` | Split an already-scanned PDF into per-document PDFs from a plan JSON (python3 stdlib); moves the source into `_originals/`. |
 | `escl-scan` | Direct eSCL client for the Brother ADS-4300N through the Push Scan Tool's localhost bridge. |
 
@@ -169,6 +170,22 @@ paper → scanimage (SANE) → page images → img2pdf/qpdf → PDF
 - `GET /files/<path>` serves PDFs from the filing root only; `GET /api/batches/<id>/thumb/<n>` serves a `sips` thumbnail.
 - Local only: it binds 127.0.0.1, refuses other Host headers (DNS rebinding) and cross-origin POSTs, and every POST must carry the per-launch token the page embeds.
 
+#### Reaching it from other devices
+
+The server never listens on the network. To use it from a phone or another computer, publish it with `tailscale serve` on a machine that is always on, and carry it there over a reverse SSH tunnel:
+
+```
+browser ──https──> tailscale serve on HOST :8445 ──> HOST 127.0.0.1:7820
+                   ──ssh -R (scan-tunnel)──> this Mac 127.0.0.1:7820 (server.ts)
+```
+
+1. On HOST: `sudo tailscale serve --bg --https=8445 http://127.0.0.1:7820`.
+2. On the Mac: `scan-catalog serve --install --public-url https://HOST.TAILNET.ts.net:8445 --allow-login you@example.com --tunnel HOST`. That writes the dashboard LaunchAgent with the two flags and a second one, `ca.beric.scan-it-tunnel`, that runs `scan-tunnel HOST` (log `~/Library/Logs/scan-it-tunnel.log`).
+
+Requests for the public URL must carry a `Tailscale-User-Login` in the `--allow-login` list. `tailscale serve` sets that header for the signed-in tailnet user and drops any copy the client sent. Tagged nodes get none, so they are refused. The login is the real gate, since anyone who can load the page gets its token. Restrict the port in the tailnet policy as well. The server won't start with `--public-url` and no `--allow-login`. From the public URL, Show in Finder and Open scans folder are hidden and refused, because they open Finder on the Mac. `SCAN_SERVE_PUBLIC_URL` and `SCAN_SERVE_ALLOW_LOGINS` (comma-separated) are the environment equivalents.
+
+When the Mac sleeps, HOST's sshd can keep the dead session's port bound for hours. So `scan-tunnel` frees the port before each connect, killing only a listening `sshd-session` owned by the same user. That lookup needs passwordless `sudo` on HOST. While the Mac is asleep or away, the public URL returns 502.
+
 The static `dashboard.html` copies in Drive keep their no-network CSP. Their live block is `null`, so they show the scanner list and a link to the live page.
 
 ### Repo layout
@@ -186,4 +203,4 @@ TROUBLESHOOTING.md          # failure modes and fixes
 
 ## Status
 
-In active use for document, paycheck, and mixed-batch scanning. The check workflow (scan → manifest → split → normalize → report) and the mixed-batch workflow (`scan-batch` + `batch-file`) both shipped 2026-06-11; per-check normalization inside `checks-split` and the entity registry landed 2026-06-12. Dev-only `bats` suites cover `batch-file`, `scan-batch`, `checks-normalize`, `scan-catalog` and the live server (68 tests). Run them with `bats test/`. macOS + iX500 specific; validated on the single machine recorded in `ENVIRONMENT.md`.
+In active use for document, paycheck, and mixed-batch scanning. The check workflow (scan → manifest → split → normalize → report) and the mixed-batch workflow (`scan-batch` + `batch-file`) both shipped 2026-06-11; per-check normalization inside `checks-split` and the entity registry landed 2026-06-12. Dev-only `bats` suites cover `batch-file`, `scan-batch`, `checks-normalize`, `scan-catalog` and the live server (71 tests). Run them with `bats test/`. macOS + iX500 specific; validated on the single machine recorded in `ENVIRONMENT.md`.

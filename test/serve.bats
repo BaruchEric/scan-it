@@ -40,6 +40,10 @@ SH
   chmod +x "$TMP/restart"
   export SCAN_BROTHER_RESTART="$TMP/restart"
 
+  # Remote access as tailscale serve delivers it: this Host, plus the login header.
+  export SCAN_SERVE_PUBLIC_URL="https://dash.example.ts.net:8445"
+  export SCAN_SERVE_ALLOW_LOGINS="owner@example.com"
+
   cat > "$TMP/tpl.html" <<'HTML'
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; img-src data:">
 <script id="catalog" type="application/json">
@@ -181,6 +185,47 @@ post() { # <path> [json]
   [ "$st" != "running" ]
   curl -fs "$URL/api/jobs/$job" | jq -r .output | grep -q "scan-diag"
   ls "$STAGING/.logs/"*"-$job-diag.log"
+}
+
+code() { curl -s -o /dev/null -w '%{http_code}' "$@"; }
+RHOST="dash.example.ts.net:8445"
+ROWN="https://dash.example.ts.net:8445"
+
+@test "the public URL needs an allowed tailnet login" {
+  [ "$(code -H "Host: $RHOST" "$URL/api/ping")" = "403" ]
+  [ "$(code -H "Host: $RHOST" -H "Tailscale-User-Login: someone@example.com" "$URL/api/ping")" = "403" ]
+  [ "$(code -H "Host: $RHOST" -H "Tailscale-User-Login: Owner@Example.com" "$URL/api/ping")" = "200" ]
+  [ "$(code -H "Host: other.example.ts.net:8445" -H "Tailscale-User-Login: owner@example.com" "$URL/api/ping")" = "421" ]
+  page=$(curl -fs -H "Host: $RHOST" -H "Tailscale-User-Login: owner@example.com" "$URL/")
+  [[ "$page" == *'"remote":true'* ]]
+  [[ "$page" == *'"url":"https://dash.example.ts.net:8445/"'* ]]
+  [[ "$(curl -fs "$URL/")" == *'"remote":false'* ]]
+}
+
+@test "remote POSTs need the public origin, and can't open Finder on the Mac" {
+  rpost() { # <path> <origin>
+    curl -s -X POST -H "Host: $RHOST" -H "Tailscale-User-Login: owner@example.com" -H "Origin: $2" \
+      -H "X-Scan-Token: $TOKEN" -H "Content-Type: application/json" -d '{}' -w '\n%{http_code}' "$URL$1"
+  }
+  run rpost /api/batches/batch-20261101-100000/stop "http://127.0.0.1:$PORT"
+  [ "${lines[1]}" = "403" ]
+  run rpost /api/batches/batch-20261101-100000/stop "$ROWN"
+  [ "${lines[1]}" = "409" ]
+  [[ "${lines[0]}" == *"not scanning"* ]]
+  run rpost /api/batches/batch-20261101-100000/reveal "$ROWN"
+  [ "${lines[1]}" = "409" ]
+  [[ "${lines[0]}" == *"only from that Mac"* ]]
+  run rpost /api/reveal "$ROWN"
+  [ "${lines[1]}" = "409" ]
+}
+
+@test "a public URL without an allowlist refuses to start" {
+  SCAN_SERVE_ALLOW_LOGINS="" run bun "$BATS_TEST_DIRNAME/../share/server.ts" --root "$ROOT" \
+    --staging "$STAGING" --port 1 --no-open
+  [ "$status" -eq 64 ]
+  [[ "$output" == *"--allow-login"* ]]
+  run "$BATS_TEST_DIRNAME/../bin/scan-catalog" -r "$ROOT" serve --tunnel somehost
+  [ "$status" -eq 64 ]
 }
 
 wait_job() { # <job id>; prints the finished job's JSON

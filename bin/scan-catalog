@@ -28,14 +28,20 @@ Commands:
                               file: the PDF or sidecar path, relative to ROOT or absolute
   dashboard [--open]          write ROOT/dashboard.html (every entity) and
                               ROOT/<entity>/dashboard.html (that entity only)
-  serve [--port N] [--no-open] [--mock]
+  serve [--port N] [--no-open] [--mock] [--public-url URL --allow-login LOGINS]
                               run the live dashboard on http://127.0.0.1:N/
                               (default 7820): scanner status, batches in
                               progress, and buttons to scan, stop, file and
-                              diagnose. Local only; needs bun.
-  serve --install [--port N] | serve --uninstall
+                              diagnose. Needs bun. --public-url also accepts
+                              requests for URL (tailscale serve on another
+                              machine, reached through scan-tunnel), from the
+                              comma-separated tailnet logins only.
+  serve --install [--port N] [--public-url URL --allow-login LOGINS] [--tunnel HOST]
                               keep it running at login as a LaunchAgent
-                              (ca.beric.scan-it-dashboard), or remove it
+                              (ca.beric.scan-it-dashboard). --tunnel adds a
+                              second one (ca.beric.scan-it-tunnel) running
+                              scan-tunnel HOST.
+  serve --uninstall           remove both LaunchAgents
 
 Workflows: $workflows
 Statuses:  $statuses
@@ -234,28 +240,43 @@ case "$cmd" in
     if (( open_it )); then open "$root/dashboard.html"; fi ;;
 
   serve)
-    port=7820 server_args=() agent=""
+    port=7820 server_args=() remote_args=() agent="" tunnel=""
     while [[ $# -gt 0 ]]; do
       case "$1" in
         --port)
           [[ $# -ge 2 && "$2" =~ ^[0-9]+$ ]] || die "--port requires a number" 64
           port="$2"; shift 2 ;;
         --no-open|--mock) server_args+=("$1"); shift ;;
+        --public-url|--allow-login)
+          [[ $# -ge 2 && -n "$2" ]] || die "$1 requires a value" 64
+          remote_args+=("$1" "$2"); shift 2 ;;
+        --tunnel)
+          [[ $# -ge 2 && -n "$2" ]] || die "--tunnel requires an ssh host" 64
+          tunnel="$2"; shift 2 ;;
         --install|--uninstall) agent="${1#--}"; shift ;;
         *) die "serve: unknown argument: $1" 64 ;;
       esac
     done
+    [[ -z "$tunnel" || "$agent" == install ]] || die "--tunnel goes with --install" 64
     url="http://127.0.0.1:$port/"
     label="ca.beric.scan-it-dashboard"
     plist="$HOME/Library/LaunchAgents/$label.plist"
+    tlabel="ca.beric.scan-it-tunnel"
+    tplist="$HOME/Library/LaunchAgents/$tlabel.plist"
     if [[ "$agent" == uninstall ]]; then
-      launchctl bootout "gui/$(id -u)/$label" 2>/dev/null || true
-      rm -f "$plist"
-      echo "Removed the $label LaunchAgent."
+      for l in "$label" "$tlabel"; do
+        launchctl bootout "gui/$(id -u)/$l" 2>/dev/null || true
+        rm -f "$HOME/Library/LaunchAgents/$l.plist"
+      done
+      echo "Removed the $label and $tlabel LaunchAgents."
       exit 0
     fi
     if [[ "$agent" == install ]]; then
       xml() { sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g' <<<"$1"; }
+      extra=""
+      for a in ${remote_args[@]+"${remote_args[@]}"}; do
+        extra+="        <string>$(xml "$a")</string>"$'\n'
+      done
       bun_dir=$(dirname "$(command -v bun 2>/dev/null || echo "$HOME/.bun/bin/bun")")
       mkdir -p "$HOME/Library/LaunchAgents" "$HOME/Library/Logs"
       cat > "$plist" <<PLIST
@@ -276,7 +297,7 @@ case "$cmd" in
         <string>--no-open</string>
         <string>--port</string>
         <string>$port</string>
-    </array>
+${extra}    </array>
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>
@@ -306,6 +327,40 @@ PLIST
         || die "the LaunchAgent started but nothing answers on $url (log: ~/Library/Logs/scan-it-dashboard.log)"
       echo "Live dashboard runs at login: $url"
       echo "  LaunchAgent $plist, log ~/Library/Logs/scan-it-dashboard.log"
+      if [[ -n "$tunnel" ]]; then
+        cat > "$tplist" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Written by scan-catalog serve --install --tunnel. Remove with scan-catalog serve --uninstall. -->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>$tlabel</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>$(xml "$script_dir/scan-tunnel")</string>
+        <string>$(xml "$tunnel")</string>
+        <string>$port</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>30</integer>
+    <key>StandardOutPath</key>
+    <string>$(xml "$HOME/Library/Logs/scan-it-tunnel.log")</string>
+    <key>StandardErrorPath</key>
+    <string>$(xml "$HOME/Library/Logs/scan-it-tunnel.log")</string>
+</dict>
+</plist>
+PLIST
+        plutil -lint "$tplist" >/dev/null || die "wrote an invalid plist: $tplist"
+        launchctl bootout "gui/$(id -u)/$tlabel" 2>/dev/null || true
+        launchctl bootstrap "gui/$(id -u)" "$tplist" || die "launchctl bootstrap failed for $tplist"
+        echo "Tunnel to $tunnel runs at login: LaunchAgent $tplist, log ~/Library/Logs/scan-it-tunnel.log"
+      fi
       exit 0
     fi
     # Already running on that port: just open it.
@@ -319,7 +374,8 @@ PLIST
     server="$script_dir/../share/server.ts"
     [[ -f "$server" ]] || die "server missing: $server"
     rm -rf "$tmp"
-    exec "$bun_bin" "$server" --root "$root" --port "$port" ${server_args[@]+"${server_args[@]}"} ;;
+    exec "$bun_bin" "$server" --root "$root" --port "$port" ${server_args[@]+"${server_args[@]}"} \
+      ${remote_args[@]+"${remote_args[@]}"} ;;
 
   *) die "unknown command: $cmd" 64 ;;
 esac

@@ -1,0 +1,49 @@
+#!/bin/bash
+# Reverse SSH tunnel for the live dashboard: HOST's 127.0.0.1:PORT reaches this
+# Mac's 127.0.0.1:PORT, where scan-catalog serve listens. Publish it on HOST
+# with tailscale serve, and start the server with --public-url and
+# --allow-login so it accepts that URL. Both ends stay on loopback; nothing on
+# this Mac listens on the network.
+#
+# Runs in the foreground until the connection drops. scan-catalog serve
+# --install --tunnel HOST runs it as a LaunchAgent that restarts it.
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage: scan-tunnel HOST [PORT]
+
+  HOST   ssh destination that runs tailscale serve (an alias from ~/.ssh/config)
+  PORT   port on both ends (default 7820)
+
+Exit codes: 0 tunnel closed · 64 usage · other: ssh's own code
+EOF
+}
+
+[[ "${1:-}" == -h || "${1:-}" == --help ]] && { usage; exit 0; }
+[[ $# -ge 1 && $# -le 2 ]] || { usage >&2; exit 64; }
+host="$1"
+port="${2:-7820}"
+[[ "$port" =~ ^[0-9]+$ ]] || { echo "scan-tunnel: PORT must be a number" >&2; exit 64; }
+
+ssh_opts=(-o BatchMode=yes -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=3)
+
+# When this Mac sleeps or changes networks, the far sshd can keep the dead
+# session's forward bound for hours (its ClientAliveInterval is often 0), and
+# ExitOnForwardFailure then fails every reconnect. So free the port first, but
+# only from an sshd session of the same user. sshd sessions hide their sockets
+# from their own user, so the lookup needs passwordless sudo there; without it
+# the tunnel waits for the stale session to time out.
+ssh "${ssh_opts[@]}" "$host" bash -s -- "$port" <<'REMOTE' || true
+port="$1"
+line=$(sudo -n ss -ltnpH "sport = :$port" 2>/dev/null | head -1) || exit 0
+pid=$(grep -o '"sshd[^"]*",pid=[0-9]*' <<<"$line" | grep -o '[0-9]*$' | head -1)
+[ -n "$pid" ] || exit 0
+[ "$(ps -o user= -p "$pid" | tr -d ' ')" = "$(id -un)" ] || exit 0
+kill "$pid" && echo "scan-tunnel: freed port $port from stale sshd session $pid"
+sleep 1
+REMOTE
+
+echo "scan-tunnel: $host 127.0.0.1:$port -> 127.0.0.1:$port"
+exec ssh "${ssh_opts[@]}" -N -o ExitOnForwardFailure=yes \
+  -R "127.0.0.1:$port:127.0.0.1:$port" "$host"
