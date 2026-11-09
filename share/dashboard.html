@@ -122,6 +122,8 @@ button, input, select { font: inherit; color: inherit; }
   border-radius: 0 14px 14px 14px; box-shadow: var(--shadow);
   padding: 40px 44px 52px;
 }
+.lock-note.warn { color: var(--ink); box-shadow: inset 3px 0 0 var(--crit); }
+.lock-note .ic { margin-right: 4px; }
 .lock-note {
   margin: 0 0 26px; padding: 10px 14px; border-radius: 8px; background: var(--wash);
   color: var(--ink-2); font-size: 14px; max-width: 70ch;
@@ -763,7 +765,18 @@ details.checks li { display: grid; grid-template-columns: 4.5em minmax(0, 1fr) a
     if (LOCKED) {
       var note = $('lock-note');
       note.hidden = false;
-      note.textContent = 'This copy holds only ' + entName(C.scope) + "'s documents. Other entities, personal and medical records are not in this file.";
+      /* Only promise the file is clean when it is: the page hides other
+         entities' rows, but they would still sit in the embedded JSON. */
+      var clean = C.entities.every(function (e) { return e.slug === C.scope; }) &&
+        C.documents.every(function (d) { return d.entity === C.scope; }) &&
+        C.paychecks.every(function (p) { return p.entity === C.scope; }) &&
+        C.review.every(function (r) { return isObj(r.guess) && r.guess.entity === C.scope; });
+      if (clean) {
+        note.textContent = 'This copy holds only ' + entName(C.scope) + "'s documents. Other entities, personal and medical records are not in this file.";
+      } else {
+        note.classList.add('warn');
+        add(note, [icon('failed'), ' This copy is meant for ' + entName(C.scope) + ' only, but the file still carries records from other entities. Regenerate it with scan-catalog dashboard before sharing it.']);
+      }
     }
   }
   function renderTabs() {

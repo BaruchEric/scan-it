@@ -416,7 +416,9 @@
       "year": null,
       "amount": null,
       "pages": 1,
-      "fields": {},
+      "fields": {
+        "ocr_text": "A&B Coin <washer #4> call back </script> tue"
+      },
       "confidence": "low",
       "source": {
         "batch": "batch-20260620-091200",
