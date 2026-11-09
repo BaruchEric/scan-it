@@ -28,6 +28,11 @@ Commands:
                               file: the PDF or sidecar path, relative to ROOT or absolute
   dashboard [--open]          write ROOT/dashboard.html (every entity) and
                               ROOT/<entity>/dashboard.html (that entity only)
+  serve [--port N] [--no-open] [--mock]
+                              run the live dashboard on http://127.0.0.1:N/
+                              (default 7820): scanner status, batches in
+                              progress, and buttons to scan, stop, file and
+                              diagnose. Local only; needs bun.
 
 Workflows: $workflows
 Statuses:  $statuses
@@ -96,7 +101,7 @@ build() { # [entity] -> catalog JSON on stdout
         entities: [$reg.entities[] | {slug, name: (.name // .slug), kind: (.kind // "business")}
                    | select(.slug | keep)],
         users: [($prof.users // [])[] | {slug, name: (.name // .slug)}],
-        scanners: [($prof.scanners // [])[] | {slug, model: (.model // .slug)}],
+        scanners: [($prof.scanners // [])[] | {slug, model: (.model // .slug), where: (.where // null)}],
         documents: [$all[]
           | select((rel | startswith("_review/") | not) and (.d | type == "object")
                    and (.d.type | type == "string") and .d.type != "paycheck" and (.d.name | type == "string"))
@@ -205,10 +210,13 @@ case "$cmd" in
       # Every "<" becomes \u003c: "</" alone is not enough, since OCR'd text
       # like "<!--<script>" would switch the HTML parser into a state that
       # swallows the closing </script>. "<" only occurs inside JSON strings.
+      # The live marker becomes null: these files are static copies, and only
+      # scan-catalog serve fills it in.
       sed 's#<#\\u003c#g' "$1" > "$tmp/escaped.json"
-      awk -v f="$tmp/escaped.json" \
-        'index($0, "/*__CATALOG__*/") { while ((getline l < f) > 0) print l; next } { print }' \
-        "$template" > "$2.tmp"
+      awk -v f="$tmp/escaped.json" '
+        index($0, "/*__CATALOG__*/") { while ((getline l < f) > 0) print l; next }
+        index($0, "/*__LIVE__*/") { print "null"; next }
+        { print }' "$template" > "$2.tmp"
       mv "$2.tmp" "$2"
     }
     build "" > "$tmp/all.json"
@@ -221,6 +229,31 @@ case "$cmd" in
       echo "$root/$ent/dashboard.html"
     done < <(jq -r '[(.documents[], .paychecks[]) | .entity // empty] | unique[]' "$tmp/all.json")
     if (( open_it )); then open "$root/dashboard.html"; fi ;;
+
+  serve)
+    port=7820 server_args=()
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --port)
+          [[ $# -ge 2 && "$2" =~ ^[0-9]+$ ]] || die "--port requires a number" 64
+          port="$2"; shift 2 ;;
+        --no-open|--mock) server_args+=("$1"); shift ;;
+        *) die "serve: unknown argument: $1" 64 ;;
+      esac
+    done
+    url="http://127.0.0.1:$port/"
+    # Already running on that port: just open it.
+    if curl -fsS --max-time 1 "${url}api/ping" 2>/dev/null | grep -q '"app":"scan-it"'; then
+      echo "scan-it live dashboard already running: $url"
+      [[ " ${server_args[*]:-} " == *" --no-open "* ]] || open "$url"
+      exit 0
+    fi
+    bun_bin=$(command -v bun 2>/dev/null || echo "$HOME/.bun/bin/bun")
+    [[ -x "$bun_bin" ]] || die "bun not found; install it from https://bun.sh"
+    server="$script_dir/../share/server.ts"
+    [[ -f "$server" ]] || die "server missing: $server"
+    rm -rf "$tmp"
+    exec "$bun_bin" "$server" --root "$root" --port "$port" ${server_args[@]+"${server_args[@]}"} ;;
 
   *) die "unknown command: $cmd" 64 ;;
 esac

@@ -102,6 +102,8 @@ teardown() { rm -rf "$TMP"; }
   cat > "$TMP/tpl.html" <<'HTML'
 <html><script id="catalog" type="application/json">
 /*__CATALOG__*/
+</script><script id="live" type="application/json">
+/*__LIVE__*/
 </script></html>
 HTML
   echo '{ "type": "letter", "name": "letter-x", "entity": "personal", "fields": { "note": "<!--<script> </script><b>" } }' \
@@ -112,9 +114,11 @@ HTML
   [ -f "$ROOT/rio-laundromat/dashboard.html" ]
   [ -f "$ROOT/personal/dashboard.html" ]
   ! grep -q '__CATALOG__' "$ROOT/dashboard.html"
+  # Static copies carry no live config; only scan-catalog serve fills it.
+  [ "$(sed -n '/<script id="live"/,/<\/script>/p' "$ROOT/dashboard.html" | sed '1d;$d')" = "null" ]
   # OCR text like "<!--<script>" or "</script>" must not break the data
   # block: every "<" inside it is escaped, and the JSON still parses.
-  [ "$(grep -c '</script>' "$ROOT/dashboard.html")" = "1" ]
+  [ "$(grep -c '</script>' "$ROOT/dashboard.html")" = "2" ]
   sed -n '/<script id="catalog"/,/<\/script>/p' "$ROOT/dashboard.html" | sed '1d;$d' > "$TMP/data.json"
   ! grep -q '<' "$TMP/data.json"
   [ "$(jq -r '.documents[] | select(.name == "letter-x") | .fields.note' "$TMP/data.json")" = "<!--<script> </script><b>" ]

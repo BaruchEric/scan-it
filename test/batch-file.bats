@@ -255,6 +255,8 @@ EOF
   [ "$(jq -r '.reason' "${pdf%.pdf}.json")" = "date unreadable" ]
   [ "$(jq -r '.source.user' "${pdf%.pdf}.json")" = "tester" ]
   [ -d "$STAGING" ]
+  # The live dashboard reads .filed to stop offering File on this batch.
+  [ -s "$STAGING/.filed" ]
 }
 
 @test "staging removed on full success with no review items" {

@@ -502,5 +502,8 @@ if (( keep_staging == 0 && nrev == 0 )); then
   rm -rf "$staging"
   echo "Staging removed."
 else
+  # .filed tells scan-catalog serve this batch is filed and only its review
+  # items are left, so it stops offering the File action.
+  now > "$staging/.filed"
   echo "Staging kept: $staging"
 fi

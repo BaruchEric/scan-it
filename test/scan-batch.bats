@@ -147,3 +147,27 @@ JSON
   run "$SCAN_BATCH" -o "$BATCHES" --idle 1 --user "Ariel B"
   [ "$status" -eq 64 ]
 }
+
+@test "a .stop file ends the batch at the next poll, and .pid marks it while it runs" {
+  "$SCAN_BATCH" -o "$BATCHES" --idle 60 > "$TMP/out" 2>&1 &
+  pid=$!
+  staging=""
+  for _ in $(seq 1 50); do
+    staging=$(echo "$BATCHES"/batch-*)
+    [ -f "$staging/batch.json" ] && break
+    sleep 0.1
+  done
+  # batch.json exists before any paper lands, so the dashboard can show it.
+  [ "$(jq -r '.pages' "$staging/batch.json")" = "0" ]
+  [ "$(cat "$staging/.pid")" = "$pid" ]
+  echo 2 > "$SCANIMAGE_STUB_DIR/feed"
+  echo yes > "$SCANIMAGE_STUB_DIR/sensor"
+  for _ in $(seq 1 50); do [ -f "$staging/pages/page-002.jpg" ] && break; sleep 0.1; done
+  touch "$staging/.stop"
+  rc=0; wait "$pid" || rc=$?
+  [ "$rc" -eq 0 ]
+  grep -q "Stop requested." "$TMP/out"
+  [ "$(jq -r '.pages' "$staging/batch.json")" = "2" ]
+  [ ! -e "$staging/.pid" ]
+  [ ! -e "$staging/.stop" ]
+}

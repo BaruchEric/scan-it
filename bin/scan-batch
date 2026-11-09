@@ -25,7 +25,8 @@ Usage: scan-batch [options]
 Continuous batch scan from the ADF. Feed paper in any number of chunks;
 scanning resumes automatically when the paper sensor sees a new stack.
 
-End the batch by pressing Enter, or after --idle seconds with no paper.
+End the batch by pressing Enter, creating <staging>/.stop (the dashboard Stop
+button does this), or after --idle seconds with no paper.
 Ctrl-C preserves the staging dir (continue later with --resume).
 
 Options:
@@ -293,6 +294,7 @@ finish() {
 wait_for_paper() {
   local waited=0
   while (( waited < idle )); do
+    if stop_requested; then finish; fi
     if [[ -t 0 ]]; then
       # read doubles as the poll sleep and the Enter-to-end check.
       if read -r -s -t "$poll_secs"; then finish; fi
@@ -306,12 +308,22 @@ wait_for_paper() {
   finish
 }
 
+# .pid marks the batch as scanning for scan-catalog serve; a .stop file (the
+# dashboard's Stop button, or touch) ends the batch at the next poll, the same
+# as pressing Enter. Both go away when scan-batch exits.
+rm -f "$staging/.stop"
+echo $$ > "$staging/.pid"
+trap 'rm -f "$staging/.pid" "$staging/.stop"' EXIT
+write_batch_json
+stop_requested() { [[ -f "$staging/.stop" ]] && echo "Stop requested."; }
+
 echo "Batch $batch_id ($source_opt, $mode, ${resolution}dpi) — $scan_user on $scanner_slug${default_entity:+, default entity $default_entity}"
-echo "Feed the ADF. Enter ends the batch; idle timeout ${idle}s."
+echo "Feed the ADF. Enter ends the batch (or the dashboard's Stop); idle timeout ${idle}s."
 
 zero_scans=0   # consecutive scans where the sensor saw paper but 0 pages fed
 
 while :; do
+  if stop_requested; then finish; fi
   if page_loaded; then
     before=$(page_count)
     scan_chunk
