@@ -1,0 +1,2694 @@
+{
+  "generated": "2026-11-08T16:30:00-0800",
+  "scope": "all",
+  "link_prefix": "",
+  "entities": [
+    {
+      "slug": "personal",
+      "name": "Personal",
+      "kind": "personal"
+    },
+    {
+      "slug": "rio-laundromat",
+      "name": "RIO LAUNDROMAT LLC",
+      "kind": "business"
+    },
+    {
+      "slug": "rio-rapid-wash",
+      "name": "Rio Rapid Wash LLC",
+      "kind": "business"
+    },
+    {
+      "slug": "rio-cycles",
+      "name": "RIO CYCLES LLC",
+      "kind": "business"
+    },
+    {
+      "slug": "aqualoop",
+      "name": "AQUALOOP LAUNDROMAT LLC",
+      "kind": "business"
+    }
+  ],
+  "users": [
+    {
+      "slug": "eric",
+      "name": "Eric"
+    },
+    {
+      "slug": "ariel",
+      "name": "Ariel"
+    },
+    {
+      "slug": "elsa",
+      "name": "Elsa"
+    }
+  ],
+  "scanners": [
+    {
+      "slug": "brother",
+      "model": "Brother ADS-4300N"
+    },
+    {
+      "slug": "ix500",
+      "model": "Fujitsu ScanSnap iX500"
+    }
+  ],
+  "documents": [
+    {
+      "file": "personal/medical/2025/medical-2025-06-12-visit-summary.pdf",
+      "type": "medical",
+      "entity": "personal",
+      "name": "medical-2025-06-12-visit-summary",
+      "date": "2025-06-12",
+      "year": "2025",
+      "amount": null,
+      "pages": 2,
+      "fields": {
+        "provider": "Larkspur Family Medicine",
+        "date": "2025-06-12"
+      },
+      "confidence": "high",
+      "source": {
+        "batch": "batch-20260620-091200",
+        "scanner": "ix500",
+        "user": "eric",
+        "host": "Erics-MacBook-Pro",
+        "scanned": "2026-06-20T09:12:00-0800"
+      },
+      "filed": "2026-06-20T09:43:00-0800",
+      "followups": {
+        "vault": {
+          "status": "done",
+          "note": null,
+          "updated": "2026-06-20T09:45:00-0800",
+          "ref": "Medical Records/2025-06-12 Larkspur Family Medicine.md"
+        }
+      }
+    },
+    {
+      "file": "personal/medical/2025/medical-2025-11-03-summit-dental-group.pdf",
+      "type": "medical",
+      "entity": "personal",
+      "name": "medical-2025-11-03-summit-dental-group",
+      "date": "2025-11-03",
+      "year": "2025",
+      "amount": 180,
+      "pages": 1,
+      "fields": {
+        "provider": "Summit Dental Group",
+        "date": "2025-11-03",
+        "total": 180
+      },
+      "confidence": "high",
+      "source": {
+        "batch": "batch-20260711-140500",
+        "scanner": "ix500",
+        "user": "ariel",
+        "host": "Ariels-MacBook-Air",
+        "scanned": "2026-07-11T14:05:00-0800"
+      },
+      "filed": "2026-07-11T14:37:00-0800",
+      "followups": {
+        "vault": {
+          "status": "skipped",
+          "note": "billing statement only, no clinical notes",
+          "updated": "2026-07-11T14:39:00-0800",
+          "ref": null
+        }
+      }
+    },
+    {
+      "file": "personal/medical/2026/medical-2026-03-18-mri-report.pdf",
+      "type": "medical",
+      "entity": "personal",
+      "name": "medical-2026-03-18-mri-report",
+      "date": "2026-03-18",
+      "year": "2026",
+      "amount": null,
+      "pages": 3,
+      "fields": {
+        "provider": "Brightwater Imaging",
+        "date": "2026-03-18"
+      },
+      "confidence": "high",
+      "source": {
+        "batch": "batch-20260802-103000",
+        "scanner": "brother",
+        "user": "elsa",
+        "host": "Front-Desk-iMac",
+        "scanned": "2026-08-02T10:30:00-0800"
+      },
+      "filed": "2026-08-02T10:59:00-0800",
+      "followups": {
+        "vault": {
+          "status": "done",
+          "note": null,
+          "updated": "2026-08-02T11:01:00-0800",
+          "ref": "Medical Records/2026-03-18 Brightwater Imaging.md"
+        }
+      }
+    },
+    {
+      "file": "personal/medical/2026/medical-2026-07-07-well-visit.pdf",
+      "type": "medical",
+      "entity": "personal",
+      "name": "medical-2026-07-07-well-visit",
+      "date": "2026-07-07",
+      "year": "2026",
+      "amount": null,
+      "pages": 2,
+      "fields": {
+        "provider": "Cedar Hill Pediatrics",
+        "date": "2026-07-07"
+      },
+      "confidence": "high",
+      "source": {
+        "batch": "batch-20260711-084500",
+        "scanner": "brother",
+        "user": "elsa",
+        "host": "Front-Desk-iMac",
+        "scanned": "2026-07-11T08:45:00-0800"
+      },
+      "filed": "2026-07-11T09:08:00-0800",
+      "followups": {
+        "vault": {
+          "status": "done",
+          "note": null,
+          "updated": "2026-07-11T09:10:00-0800",
+          "ref": "Medical Records/2026-07-07 Cedar Hill Pediatrics.md"
+        }
+      }
+    },
+    {
+      "file": "personal/medical/2026/medical-2026-10-29-lab-results.pdf",
+      "type": "medical",
+      "entity": "personal",
+      "name": "medical-2026-10-29-lab-results",
+      "date": "2026-10-29",
+      "year": "2026",
+      "amount": null,
+      "pages": 4,
+      "fields": {
+        "provider": "Larkspur Family Medicine",
+        "date": "2026-10-29"
+      },
+      "confidence": "high",
+      "source": {
+        "batch": "batch-20261031-094000",
+        "scanner": "brother",
+        "user": "elsa",
+        "host": "Front-Desk-iMac",
+        "scanned": "2026-10-31T09:40:00-0800"
+      },
+      "filed": "2026-10-31T10:17:00-0800",
+      "followups": {
+        "vault": {
+          "status": "pending",
+          "note": null,
+          "updated": "2026-10-31T10:19:00-0800",
+          "ref": null
+        }
+      }
+    },
+    {
+      "file": "personal/taxes/2026/tax-2026-01-31-w-2-2025.pdf",
+      "type": "tax",
+      "entity": "personal",
+      "name": "tax-2026-01-31-w-2-2025",
+      "date": "2026-01-31",
+      "year": "2026",
+      "amount": null,
+      "pages": 2,
+      "fields": {
+        "form": "W-2",
+        "tax_year": 2025,
+        "issuer": "Northgate Staffing",
+        "date": "2026-01-31"
+      },
+      "confidence": "high",
+      "source": {
+        "batch": "batch-20260802-103000",
+        "scanner": "brother",
+        "user": "elsa",
+        "host": "Front-Desk-iMac",
+        "scanned": "2026-08-02T10:30:00-0800"
+      },
+      "filed": "2026-08-02T10:53:00-0800",
+      "followups": {
+        "tax_copy": {
+          "status": "done",
+          "note": null,
+          "updated": "2026-08-02T10:55:00-0800",
+          "ref": "Tax/2026"
+        }
+      }
+    },
+    {
+      "file": "personal/taxes/2026/tax-2026-02-14-1099-int-2025.pdf",
+      "type": "tax",
+      "entity": "personal",
+      "name": "tax-2026-02-14-1099-int-2025",
+      "date": "2026-02-14",
+      "year": "2026",
+      "amount": null,
+      "pages": 1,
+      "fields": {
+        "form": "1099-INT",
+        "tax_year": 2025,
+        "issuer": "Meridian Credit Union",
+        "date": "2026-02-14"
+      },
+      "confidence": "high",
+      "source": {
+        "batch": "batch-20260620-091200",
+        "scanner": "ix500",
+        "user": "eric",
+        "host": "Erics-MacBook-Pro",
+        "scanned": "2026-06-20T09:12:00-0800"
+      },
+      "filed": "2026-06-20T09:40:00-0800",
+      "followups": {
+        "tax_copy": {
+          "status": "done",
+          "note": null,
+          "updated": "2026-06-20T09:42:00-0800",
+          "ref": "Tax/2026"
+        }
+      }
+    },
+    {
+      "file": "personal/statements/2026/statement-2026-09-30-checking.pdf",
+      "type": "statement",
+      "entity": "personal",
+      "name": "statement-2026-09-30-checking",
+      "date": "2026-09-30",
+      "year": "2026",
+      "amount": null,
+      "pages": 3,
+      "fields": {
+        "institution": "Meridian Credit Union",
+        "period_end": "2026-09-30",
+        "account": "ending 8755"
+      },
+      "confidence": "high",
+      "source": {
+        "batch": "batch-20261002-140000",
+        "scanner": "brother",
+        "user": "eric",
+        "host": "Erics-MacBook-Pro",
+        "scanned": "2026-10-02T14:00:00-0800"
+      },
+      "filed": "2026-10-02T14:21:00-0800",
+      "followups": {}
+    },
+    {
+      "file": "personal/letters/2026/letter-2026-10-20-renewal-notice.pdf",
+      "type": "letter",
+      "entity": "personal",
+      "name": "letter-2026-10-20-renewal-notice",
+      "date": "2026-10-20",
+      "year": "2026",
+      "amount": null,
+      "pages": 2,
+      "fields": {
+        "sender": "Cascade Mutual Insurance",
+        "date": "2026-10-20",
+        "due_date": "2026-11-20"
+      },
+      "confidence": "high",
+      "source": {
+        "batch": "batch-20261023-084000",
+        "scanner": "brother",
+        "user": "eric",
+        "host": "Erics-MacBook-Pro",
+        "scanned": "2026-10-23T08:40:00-0800"
+      },
+      "filed": "2026-10-23T08:59:00-0800",
+      "followups": {
+        "calendar": {
+          "status": "done",
+          "note": "reminder 3 days before",
+          "updated": "2026-10-23T09:01:00-0800",
+          "ref": "evt_900296"
+        }
+      }
+    },
+    {
+      "file": "personal/receipts/2025/receipt-2025-12-20-fernwood-hardware $62.18.pdf",
+      "type": "receipt",
+      "entity": "personal",
+      "name": "receipt-2025-12-20-fernwood-hardware $62.18",
+      "date": "2025-12-20",
+      "year": "2025",
+      "amount": 62.18,
+      "pages": 1,
+      "fields": {
+        "vendor": "Fernwood Hardware",
+        "date": "2025-12-20",
+        "total": 62.18
+      },
+      "confidence": "high",
+      "source": {
+        "batch": "batch-20260620-091200",
+        "scanner": "ix500",
+        "user": "eric",
+        "host": "Erics-MacBook-Pro",
+        "scanned": "2026-06-20T09:12:00-0800"
+      },
+      "filed": "2026-06-20T09:36:00-0800",
+      "followups": {}
+    },
+    {
+      "file": "personal/contracts/2025/contract-2025-08-15-service-agreement.pdf",
+      "type": "contract",
+      "entity": "personal",
+      "name": "contract-2025-08-15-service-agreement",
+      "date": "2025-08-15",
+      "year": "2025",
+      "amount": null,
+      "pages": 7,
+      "fields": {
+        "party": "Oakline Home Warranty",
+        "effective_date": "2025-08-15",
+        "term_months": 36
+      },
+      "confidence": "high",
+      "source": {
+        "batch": "batch-20260711-140500",
+        "scanner": "ix500",
+        "user": "ariel",
+        "host": "Ariels-MacBook-Air",
+        "scanned": "2026-07-11T14:05:00-0800"
+      },
+      "filed": "2026-07-11T14:42:00-0800",
+      "followups": {}
+    },
+    {
+      "file": "personal/misc/2026/misc-2026-05-09-passport-renewal-checklist.pdf",
+      "type": "misc",
+      "entity": "personal",
+      "name": "misc-2026-05-09-passport-renewal-checklist",
+      "date": "2026-05-09",
+      "year": "2026",
+      "amount": null,
+      "pages": 1,
+      "fields": {
+        "subject": "Passport renewal checklist",
+        "date": "2026-05-09"
+      },
+      "confidence": "high",
+      "source": {
+        "batch": "batch-20260802-103000",
+        "scanner": "brother",
+        "user": "elsa",
+        "host": "Front-Desk-iMac",
+        "scanned": "2026-08-02T10:30:00-0800"
+      },
+      "filed": "2026-08-02T11:05:00-0800",
+      "followups": {}
+    },
+    {
+      "file": "personal/misc/misc-undated-handwritten-note.pdf",
+      "type": "misc",
+      "entity": "personal",
+      "name": "misc-undated-handwritten-note",
+      "date": null,
+      "year": null,
+      "amount": null,
+      "pages": 1,
+      "fields": {
+        "ocr_text": "A&B Coin <washer #4> call back </script> tue"
+      },
+      "confidence": "low",
+      "source": {
+        "batch": "batch-20260620-091200",
+        "scanner": "ix500",
+        "user": "eric",
+        "host": "Erics-MacBook-Pro",
+        "scanned": "2026-06-20T09:12:00-0800"
+      },
+      "filed": "2026-06-20T09:32:00-0800",
+      "followups": {}
+    },
+    {
+      "file": "personal/invoices/2026/invoice-2026-10-25-pinecrest-plumbing $340.00.pdf",
+      "type": "invoice",
+      "entity": "personal",
+      "name": "invoice-2026-10-25-pinecrest-plumbing $340.00",
+      "date": "2026-10-25",
+      "year": "2026",
+      "amount": 340,
+      "pages": 1,
+      "fields": {
+        "vendor": "Pinecrest Plumbing",
+        "date": "2026-10-25",
+        "total": 340,
+        "invoice_number": "INV-41115",
+        "due_date": "2026-11-12"
+      },
+      "confidence": "high",
+      "source": {
+        "batch": "batch-20261027-091500",
+        "scanner": "ix500",
+        "user": "elsa",
+        "host": "Front-Desk-iMac",
+        "scanned": "2026-10-27T09:15:00-0800"
+      },
+      "filed": "2026-10-27T09:39:00-0800",
+      "followups": {
+        "calendar": {
+          "status": "pending",
+          "note": "reminder 3 days before",
+          "updated": "2026-10-27T09:41:00-0800",
+          "ref": null
+        }
+      }
+    },
+    {
+      "file": "personal/letters/2025/letter-2025-09-08-property-tax-notice.pdf",
+      "type": "letter",
+      "entity": "personal",
+      "name": "letter-2025-09-08-property-tax-notice",
+      "date": "2025-09-08",
+      "year": "2025",
+      "amount": null,
+      "pages": 1,
+      "fields": {
+        "sender": "County Assessor",
+        "date": "2025-09-08"
+      },
+      "confidence": "high",
+      "source": {
+        "batch": "batch-20260802-103000",
+        "scanner": "brother",
+        "user": "elsa",
+        "host": "Front-Desk-iMac",
+        "scanned": "2026-08-02T10:30:00-0800"
+      },
+      "filed": "2026-08-02T11:07:00-0800",
+      "followups": {}
+    },
+    {
+      "file": "rio-laundromat/receipts/2025/receipt-2025-05-14-harbor-supply-co $128.40.pdf",
+      "type": "receipt",
+      "entity": "rio-laundromat",
+      "name": "receipt-2025-05-14-harbor-supply-co $128.40",
+      "date": "2025-05-14",
+      "year": "2025",
+      "amount": 128.4,
+      "pages": 1,
+      "fields": {
+        "vendor": "Harbor Supply Co",
+        "date": "2025-05-14",
+        "total": 128.4
+      },
+      "confidence": "high",
+      "source": {
+        "batch": "batch-20260620-091200",
+        "scanner": "ix500",
+        "user": "eric",
+        "host": "Erics-MacBook-Pro",
+        "scanned": "2026-06-20T09:12:00-0800"
+      },
+      "filed": "2026-06-20T09:36:00-0800",
+      "followups": {
+        "quickbooks": {
+          "status": "done",
+          "note": null,
+          "updated": "2026-06-20T09:38:00-0800",
+          "ref": "qbo-draft-1215"
+        },
+        "tax_copy": {
+          "status": "done",
+          "note": null,
+          "updated": "2026-06-20T09:38:00-0800",
+          "ref": "Tax/2025"
+        }
+      }
+    },
+    {
+      "file": "rio-laundromat/receipts/2025/receipt-2025-07-22-tidewater-chemical $412.75.pdf",
+      "type": "receipt",
+      "entity": "rio-laundromat",
+      "name": "receipt-2025-07-22-tidewater-chemical $412.75",
+      "date": "2025-07-22",
+      "year": "2025",
+      "amount": 412.75,
+      "pages": 1,
+      "fields": {
+        "vendor": "Tidewater Chemical",
+        "date": "2025-07-22",
+        "total": 412.75
+      },
+      "confidence": "high",
+      "source": {
+        "batch": "batch-20260711-140500",
+        "scanner": "ix500",
+        "user": "ariel",
+        "host": "Ariels-MacBook-Air",
+        "scanned": "2026-07-11T14:05:00-0800"
+      },
+      "filed": "2026-07-11T14:28:00-0800",
+      "followups": {
+        "quickbooks": {
+          "status": "done",
+          "note": null,
+          "updated": "2026-07-11T14:30:00-0800",
+          "ref": "qbo-draft-1216"
+        },
+        "tax_copy": {
+          "status": "done",
+          "note": null,
+          "updated": "2026-07-11T14:30:00-0800",
+          "ref": "Tax/2025"
+        }
+      }
+    },
+    {
+      "file": "rio-laundromat/receipts/2025/receipt-2025-09-03-fernwood-hardware $45.23.pdf",
+      "type": "receipt",
+      "entity": "rio-laundromat",
+      "name": "receipt-2025-09-03-fernwood-hardware $45.23",
+      "date": "2025-09-03",
+      "year": "2025",
+      "amount": 45.23,
+      "pages": 1,
+      "fields": {
+        "vendor": "Fernwood Hardware",
+        "date": "2025-09-03",
+        "total": 45.23
+      },
+      "confidence": "high",
+      "source": {
+        "batch": "batch-20260802-103000",
+        "scanner": "brother",
+        "user": "elsa",
+        "host": "Front-Desk-iMac",
+        "scanned": "2026-08-02T10:30:00-0800"
+      },
+      "filed": "2026-08-02T10:58:00-0800",
+      "followups": {
+        "quickbooks": {
+          "status": "done",
+          "note": null,
+          "updated": "2026-08-02T11:00:00-0800",
+          "ref": "qbo-draft-1217"
+        },
+        "tax_copy": {
+          "status": "done",
+          "note": null,
+          "updated": "2026-08-02T11:00:00-0800",
+          "ref": "Tax/2025"
+        }
+      }
+    },
+    {
+      "file": "rio-laundromat/receipts/2025/receipt-2025-12-11-harbor-supply-co $96.10.pdf",
+      "type": "receipt",
+      "entity": "rio-laundromat",
+      "name": "receipt-2025-12-11-harbor-supply-co $96.10",
+      "date": "2025-12-11",
+      "year": "2025",
+      "amount": 96.1,
+      "pages": 1,
+      "fields": {
+        "vendor": "Harbor Supply Co",
+        "date": "2025-12-11",
+        "total": 96.1
+      },
+      "confidence": "high",
+      "source": {
+        "batch": "batch-20260620-091200",
+        "scanner": "ix500",
+        "user": "eric",
+        "host": "Erics-MacBook-Pro",
+        "scanned": "2026-06-20T09:12:00-0800"
+      },
+      "filed": "2026-06-20T09:42:00-0800",
+      "followups": {
+        "quickbooks": {
+          "status": "done",
+          "note": null,
+          "updated": "2026-06-20T09:44:00-0800",
+          "ref": "qbo-draft-1218"
+        },
+        "tax_copy": {
+          "status": "done",
+          "note": null,
+          "updated": "2026-06-20T09:44:00-0800",
+          "ref": "Tax/2025"
+        }
+      }
+    },
+    {
+      "file": "rio-laundromat/receipts/2026/receipt-2026-02-06-tidewater-chemical $388.20.pdf",
+      "type": "receipt",
+      "entity": "rio-laundromat",
+      "name": "receipt-2026-02-06-tidewater-chemical $388.20",
+      "date": "2026-02-06",
+      "year": "2026",
+      "amount": 388.2,
+      "pages": 1,
+      "fields": {
+        "vendor": "Tidewater Chemical",
+        "date": "2026-02-06",
+        "total": 388.2
+      },
+      "confidence": "high",
+      "source": {
+        "batch": "batch-20260711-140500",
+        "scanner": "ix500",
+        "user": "ariel",
+        "host": "Ariels-MacBook-Air",
+        "scanned": "2026-07-11T14:05:00-0800"
+      },
+      "filed": "2026-07-11T14:29:00-0800",
+      "followups": {
+        "quickbooks": {
+          "status": "done",
+          "note": null,
+          "updated": "2026-07-11T14:31:00-0800",
+          "ref": "qbo-draft-1219"
+        },
+        "tax_copy": {
+          "status": "done",
+          "note": null,
+          "updated": "2026-07-11T14:31:00-0800",
+          "ref": "Tax/2026"
+        }
+      }
+    },
+    {
+      "file": "rio-laundromat/receipts/2026/receipt-2026-04-17-quarry-signworks $650.00.pdf",
+      "type": "receipt",
+      "entity": "rio-laundromat",
+      "name": "receipt-2026-04-17-quarry-signworks $650.00",
+      "date": "2026-04-17",
+      "year": "2026",
+      "amount": 650,
+      "pages": 1,
+      "fields": {
+        "vendor": "Quarry Signworks",
+        "date": "2026-04-17",
+        "total": 650
+      },
+      "confidence": "high",
+      "source": {
+        "batch": "batch-20260802-103000",
+        "scanner": "brother",
+        "user": "elsa",
+        "host": "Front-Desk-iMac",
+        "scanned": "2026-08-02T10:30:00-0800"
+      },
+      "filed": "2026-08-02T10:57:00-0800",
+      "followups": {
+        "quickbooks": {
+          "status": "done",
+          "note": null,
+          "updated": "2026-08-02T10:59:00-0800",
+          "ref": "qbo-draft-1220"
+        },
+        "tax_copy": {
+          "status": "done",
+          "note": null,
+          "updated": "2026-08-02T10:59:00-0800",
+          "ref": "Tax/2026"
+        }
+      }
+    },
+    {
+      "file": "rio-laundromat/receipts/2026/receipt-2026-06-08-fernwood-hardware $45.23.pdf",
+      "type": "receipt",
+      "entity": "rio-laundromat",
+      "name": "receipt-2026-06-08-fernwood-hardware $45.23",
+      "date": "2026-06-08",
+      "year": "2026",
+      "amount": 45.23,
+      "pages": 1,
+      "fields": {
+        "vendor": "Fernwood Hardware",
+        "date": "2026-06-08",
+        "total": 45.23
+      },
+      "confidence": "high",
+      "source": {
+        "batch": "batch-20260620-091200",
+        "scanner": "ix500",
+        "user": "eric",
+        "host": "Erics-MacBook-Pro",
+        "scanned": "2026-06-20T09:12:00-0800"
+      },
+      "filed": "2026-06-20T09:33:00-0800",
+      "followups": {
+        "quickbooks": {
+          "status": "done",
+          "note": null,
+          "updated": "2026-06-20T09:35:00-0800",
+          "ref": "qbo-draft-1221"
+        },
+        "tax_copy": {
+          "status": "done",
+          "note": null,
+          "updated": "2026-06-20T09:35:00-0800",
+          "ref": "Tax/2026"
+        }
+      }
+    },
+    {
+      "file": "rio-laundromat/receipts/2026/receipt-2026-08-21-harbor-supply-co $212.64.pdf",
+      "type": "receipt",
+      "entity": "rio-laundromat",
+      "name": "receipt-2026-08-21-harbor-supply-co $212.64",
+      "date": "2026-08-21",
+      "year": "2026",
+      "amount": 212.64,
+      "pages": 2,
+      "fields": {
+        "vendor": "Harbor Supply Co",
+        "date": "2026-08-21",
+        "total": 212.64
+      },
+      "confidence": "high",
+      "source": {
+        "batch": "batch-20260825-113000",
+        "scanner": "brother",
+        "user": "ariel",
+        "host": "Ariels-MacBook-Air",
+        "scanned": "2026-08-25T11:30:00-0800"
+      },
+      "filed": "2026-08-25T11:49:00-0800",
+      "followups": {
+        "quickbooks": {
+          "status": "done",
+          "note": null,
+          "updated": "2026-08-25T11:51:00-0800",
+          "ref": "qbo-draft-1222"
+        },
+        "tax_copy": {
+          "status": "done",
+          "note": null,
+          "updated": "2026-08-25T11:51:00-0800",
+          "ref": "Tax/2026"
+        }
+      }
+    },
+    {
+      "file": "rio-laundromat/receipts/2026/receipt-2026-10-30-tidewater-chemical $455.90.pdf",
+      "type": "receipt",
+      "entity": "rio-laundromat",
+      "name": "receipt-2026-10-30-tidewater-chemical $455.90",
+      "date": "2026-10-30",
+      "year": "2026",
+      "amount": 455.9,
+      "pages": 1,
+      "fields": {
+        "vendor": "Tidewater Chemical",
+        "date": "2026-10-30",
+        "total": 455.9
+      },
+      "confidence": "high",
+      "source": {
+        "batch": "batch-20261101-115000",
+        "scanner": "brother",
+        "user": "ariel",
+        "host": "Ariels-MacBook-Air",
+        "scanned": "2026-11-01T11:50:00-0800"
+      },
+      "filed": "2026-11-01T12:12:00-0800",
+      "followups": {
+        "quickbooks": {
+          "status": "pending",
+          "note": null,
+          "updated": "2026-11-01T12:14:00-0800",
+          "ref": null
+        },
+        "tax_copy": {
+          "status": "pending",
+          "note": null,
+          "updated": "2026-11-01T12:14:00-0800",
+          "ref": null
+        }
+      }
+    },
+    {
+      "file": "rio-laundromat/receipts/2026/receipt-2026-11-05-fernwood-hardware $73.48.pdf",
+      "type": "receipt",
+      "entity": "rio-laundromat",
+      "name": "receipt-2026-11-05-fernwood-hardware $73.48",
+      "date": "2026-11-05",
+      "year": "2026",
+      "amount": 73.48,
+      "pages": 1,
+      "fields": {
+        "vendor": "Fernwood Hardware",
+        "date": "2026-11-05",
+        "total": 73.48
+      },
+      "confidence": "high",
+      "source": {
+        "batch": "batch-20261108-164000",
+        "scanner": "ix500",
+        "user": "elsa",
+        "host": "Front-Desk-iMac",
+        "scanned": "2026-11-08T16:40:00-0800"
+      },
+      "filed": "2026-11-08T17:03:00-0800",
+      "followups": {
+        "quickbooks": {
+          "status": "pending",
+          "note": null,
+          "updated": "2026-11-08T17:05:00-0800",
+          "ref": null
+        },
+        "tax_copy": {
+          "status": "pending",
+          "note": null,
+          "updated": "2026-11-08T17:05:00-0800",
+          "ref": null
+        }
+      }
+    },
+    {
+      "file": "rio-laundromat/invoices/2025/invoice-2025-06-30-bluewater-utilities $1284.33.pdf",
+      "type": "invoice",
+      "entity": "rio-laundromat",
+      "name": "invoice-2025-06-30-bluewater-utilities $1284.33",
+      "date": "2025-06-30",
+      "year": "2025",
+      "amount": 1284.33,
+      "pages": 2,
+      "fields": {
+        "vendor": "Bluewater Utilities",
+        "date": "2025-06-30",
+        "total": 1284.33,
+        "invoice_number": "INV-41961",
+        "due_date": "2025-07-20"
+      },
+      "confidence": "high",
+      "source": {
+        "batch": "batch-20260711-140500",
+        "scanner": "ix500",
+        "user": "ariel",
+        "host": "Ariels-MacBook-Air",
+        "scanned": "2026-07-11T14:05:00-0800"
+      },
+      "filed": "2026-07-11T14:37:00-0800",
+      "followups": {
+        "quickbooks": {
+          "status": "done",
+          "note": null,
+          "updated": "2026-07-11T14:39:00-0800",
+          "ref": "qbo-draft-1225"
+        },
+        "tax_copy": {
+          "status": "done",
+          "note": null,
+          "updated": "2026-07-11T14:39:00-0800",
+          "ref": "Tax/2025"
+        },
+        "calendar": {
+          "status": "done",
+          "note": "reminder 3 days before",
+          "updated": "2026-07-11T14:39:00-0800",
+          "ref": "evt_900925"
+        }
+      }
+    },
+    {
+      "file": "rio-laundromat/invoices/2025/invoice-2025-10-31-bluewater-utilities $1198.07.pdf",
+      "type": "invoice",
+      "entity": "rio-laundromat",
+      "name": "invoice-2025-10-31-bluewater-utilities $1198.07",
+      "date": "2025-10-31",
+      "year": "2025",
+      "amount": 1198.07,
+      "pages": 2,
+      "fields": {
+        "vendor": "Bluewater Utilities",
+        "date": "2025-10-31",
+        "total": 1198.07,
+        "invoice_number": "INV-45659",
+        "due_date": "2025-11-20"
+      },
+      "confidence": "high",
+      "source": {
+        "batch": "batch-20260802-103000",
+        "scanner": "brother",
+        "user": "elsa",
+        "host": "Front-Desk-iMac",
+        "scanned": "2026-08-02T10:30:00-0800"
+      },
+      "filed": "2026-08-02T11:06:00-0800",
+      "followups": {
+        "quickbooks": {
+          "status": "done",
+          "note": null,
+          "updated": "2026-08-02T11:08:00-0800",
+          "ref": "qbo-draft-1226"
+        },
+        "tax_copy": {
+          "status": "done",
+          "note": null,
+          "updated": "2026-08-02T11:08:00-0800",
+          "ref": "Tax/2025"
+        },
+        "calendar": {
+          "status": "done",
+          "note": "reminder 3 days before",
+          "updated": "2026-08-02T11:08:00-0800",
+          "ref": "evt_900962"
+        }
+      }
+    },
+    {
+      "file": "rio-laundromat/invoices/2026/invoice-2026-03-31-pinecrest-mechanical $2450.00.pdf",
+      "type": "invoice",
+      "entity": "rio-laundromat",
+      "name": "invoice-2026-03-31-pinecrest-mechanical $2450.00",
+      "date": "2026-03-31",
+      "year": "2026",
+      "amount": 2450,
+      "pages": 1,
+      "fields": {
+        "vendor": "Pinecrest Mechanical",
+        "date": "2026-03-31",
+        "total": 2450,
+        "invoice_number": "INV-48560",
+        "due_date": "2026-04-30"
+      },
+      "confidence": "high",
+      "source": {
+        "batch": "batch-20260620-091200",
+        "scanner": "ix500",
+        "user": "eric",
+        "host": "Erics-MacBook-Pro",
+        "scanned": "2026-06-20T09:12:00-0800"
+      },
+      "filed": "2026-06-20T09:33:00-0800",
+      "followups": {
+        "quickbooks": {
+          "status": "done",
+          "note": null,
+          "updated": "2026-06-20T09:35:00-0800",
+          "ref": "qbo-draft-1227"
+        },
+        "tax_copy": {
+          "status": "done",
+          "note": null,
+          "updated": "2026-06-20T09:35:00-0800",
+          "ref": "Tax/2026"
+        },
+        "calendar": {
+          "status": "done",
+          "note": "reminder 3 days before",
+          "updated": "2026-06-20T09:35:00-0800",
+          "ref": "evt_900999"
+        }
+      }
+    },
+    {
+      "file": "rio-laundromat/invoices/2026/invoice-2026-09-30-bluewater-utilities $1342.88.pdf",
+      "type": "invoice",
+      "entity": "rio-laundromat",
+      "name": "invoice-2026-09-30-bluewater-utilities $1342.88",
+      "date": "2026-09-30",
+      "year": "2026",
+      "amount": 1342.88,
+      "pages": 2,
+      "fields": {
+        "vendor": "Bluewater Utilities",
+        "date": "2026-09-30",
+        "total": 1342.88,
+        "invoice_number": "INV-48458",
+        "due_date": "2026-10-28"
+      },
+      "confidence": "high",
+      "source": {
+        "batch": "batch-20261002-125000",
+        "scanner": "ix500",
+        "user": "ariel",
+        "host": "Ariels-MacBook-Air",
+        "scanned": "2026-10-02T12:50:00-0800"
+      },
+      "filed": "2026-10-02T13:16:00-0800",
+      "followups": {
+        "quickbooks": {
+          "status": "done",
+          "note": null,
+          "updated": "2026-10-02T13:18:00-0800",
+          "ref": "qbo-draft-1228"
+        },
+        "tax_copy": {
+          "status": "done",
+          "note": null,
+          "updated": "2026-10-02T13:18:00-0800",
+          "ref": "Tax/2026"
+        },
+        "calendar": {
+          "status": "done",
+          "note": "reminder 3 days before",
+          "updated": "2026-10-02T13:18:00-0800",
+          "ref": "evt_901036"
+        }
+      }
+    },
+    {
+      "file": "rio-laundromat/invoices/2026/invoice-2026-10-15-coastline-waste-services $318.00.pdf",
+      "type": "invoice",
+      "entity": "rio-laundromat",
+      "name": "invoice-2026-10-15-coastline-waste-services $318.00",
+      "date": "2026-10-15",
+      "year": "2026",
+      "amount": 318,
+      "pages": 1,
+      "fields": {
+        "vendor": "Coastline Waste Services",
+        "date": "2026-10-15",
+        "total": 318,
+        "invoice_number": "INV-44322",
+        "due_date": "2026-11-14"
+      },
+      "confidence": "high",
+      "source": {
+        "batch": "batch-20261020-080000",
+        "scanner": "brother",
+        "user": "eric",
+        "host": "Erics-MacBook-Pro",
+        "scanned": "2026-10-20T08:00:00-0800"
+      },
+      "filed": "2026-10-20T08:19:00-0800",
+      "followups": {
+        "quickbooks": {
+          "status": "failed",
+          "note": "vendor Coastline Waste Services not found in QuickBooks",
+          "updated": "2026-10-20T08:21:00-0800",
+          "ref": null
+        },
+        "tax_copy": {
+          "status": "done",
+          "note": null,
+          "updated": "2026-10-20T08:21:00-0800",
+          "ref": "Tax/2026"
+        },
+        "calendar": {
+          "status": "done",
+          "note": "reminder 3 days before",
+          "updated": "2026-10-20T08:21:00-0800",
+          "ref": "evt_901073"
+        }
+      }
+    },
+    {
+      "file": "rio-laundromat/invoices/2026/invoice-2026-10-31-bluewater-utilities $1301.12.pdf",
+      "type": "invoice",
+      "entity": "rio-laundromat",
+      "name": "invoice-2026-10-31-bluewater-utilities $1301.12",
+      "date": "2026-10-31",
+      "year": "2026",
+      "amount": 1301.12,
+      "pages": 2,
+      "fields": {
+        "vendor": "Bluewater Utilities",
+        "date": "2026-10-31",
+        "total": 1301.12,
+        "invoice_number": "INV-43026",
+        "due_date": "2026-11-21"
+      },
+      "confidence": "high",
+      "source": {
+        "batch": "batch-20261105-092000",
+        "scanner": "brother",
+        "user": "eric",
+        "host": "Erics-MacBook-Pro",
+        "scanned": "2026-11-05T09:20:00-0800"
+      },
+      "filed": "2026-11-05T09:52:00-0800",
+      "followups": {
+        "quickbooks": {
+          "status": "pending",
+          "note": null,
+          "updated": "2026-11-05T09:54:00-0800",
+          "ref": null
+        },
+        "tax_copy": {
+          "status": "done",
+          "note": null,
+          "updated": "2026-11-05T09:54:00-0800",
+          "ref": "Tax/2026"
+        },
+        "calendar": {
+          "status": "pending",
+          "note": "reminder 3 days before",
+          "updated": "2026-11-05T09:54:00-0800",
+          "ref": null
+        }
+      }
+    },
+    {
+      "file": "rio-laundromat/statements/2026/statement-2026-07-31-business-checking.pdf",
+      "type": "statement",
+      "entity": "rio-laundromat",
+      "name": "statement-2026-07-31-business-checking",
+      "date": "2026-07-31",
+      "year": "2026",
+      "amount": null,
+      "pages": 4,
+      "fields": {
+        "institution": "Northgate Bank",
+        "period_end": "2026-07-31",
+        "account": "ending 4141"
+      },
+      "confidence": "high",
+      "source": {
+        "batch": "batch-20260804-142500",
+        "scanner": "brother",
+        "user": "ariel",
+        "host": "Ariels-MacBook-Air",
+        "scanned": "2026-08-04T14:25:00-0800"
+      },
+      "filed": "2026-08-04T14:53:00-0800",
+      "followups": {}
+    },
+    {
+      "file": "rio-laundromat/statements/2026/statement-2026-10-31-business-checking.pdf",
+      "type": "statement",
+      "entity": "rio-laundromat",
+      "name": "statement-2026-10-31-business-checking",
+      "date": "2026-10-31",
+      "year": "2026",
+      "amount": null,
+      "pages": 4,
+      "fields": {
+        "institution": "Northgate Bank",
+        "period_end": "2026-10-31",
+        "account": "ending 1948"
+      },
+      "confidence": "high",
+      "source": {
+        "batch": "batch-20261104-155500",
+        "scanner": "brother",
+        "user": "ariel",
+        "host": "Ariels-MacBook-Air",
+        "scanned": "2026-11-04T15:55:00-0800"
+      },
+      "filed": "2026-11-04T16:18:00-0800",
+      "followups": {}
+    },
+    {
+      "file": "rio-laundromat/contracts/2025/contract-2025-05-01-washer-lease.pdf",
+      "type": "contract",
+      "entity": "rio-laundromat",
+      "name": "contract-2025-05-01-washer-lease",
+      "date": "2025-05-01",
+      "year": "2025",
+      "amount": null,
+      "pages": 9,
+      "fields": {
+        "party": "Kessler Laundry Equipment",
+        "effective_date": "2025-05-01",
+        "term_months": 60
+      },
+      "confidence": "high",
+      "source": {
+        "batch": "batch-20260620-091200",
+        "scanner": "ix500",
+        "user": "eric",
+        "host": "Erics-MacBook-Pro",
+        "scanned": "2026-06-20T09:12:00-0800"
+      },
+      "filed": "2026-06-20T09:39:00-0800",
+      "followups": {}
+    },
+    {
+      "file": "rio-laundromat/taxes/2026/tax-2026-01-28-form-941-q4-2025.pdf",
+      "type": "tax",
+      "entity": "rio-laundromat",
+      "name": "tax-2026-01-28-form-941-q4-2025",
+      "date": "2026-01-28",
+      "year": "2026",
+      "amount": null,
+      "pages": 3,
+      "fields": {
+        "form": "941",
+        "tax_year": 2025,
+        "period": "Q4",
+        "date": "2026-01-28"
+      },
+      "confidence": "high",
+      "source": {
+        "batch": "batch-20260711-140500",
+        "scanner": "ix500",
+        "user": "ariel",
+        "host": "Ariels-MacBook-Air",
+        "scanned": "2026-07-11T14:05:00-0800"
+      },
+      "filed": "2026-07-11T14:31:00-0800",
+      "followups": {
+        "tax_copy": {
+          "status": "done",
+          "note": null,
+          "updated": "2026-07-11T14:33:00-0800",
+          "ref": "Tax/2026"
+        }
+      }
+    },
+    {
+      "file": "rio-laundromat/taxes/2026/tax-2026-03-10-form-1120-s-2025.pdf",
+      "type": "tax",
+      "entity": "rio-laundromat",
+      "name": "tax-2026-03-10-form-1120-s-2025",
+      "date": "2026-03-10",
+      "year": "2026",
+      "amount": null,
+      "pages": 22,
+      "fields": {
+        "form": "1120-S",
+        "tax_year": 2025,
+        "date": "2026-03-10"
+      },
+      "confidence": "high",
+      "source": {
+        "batch": "batch-20260802-103000",
+        "scanner": "brother",
+        "user": "elsa",
+        "host": "Front-Desk-iMac",
+        "scanned": "2026-08-02T10:30:00-0800"
+      },
+      "filed": "2026-08-02T10:58:00-0800",
+      "followups": {
+        "tax_copy": {
+          "status": "done",
+          "note": null,
+          "updated": "2026-08-02T11:00:00-0800",
+          "ref": "Tax/2026"
+        }
+      }
+    },
+    {
+      "file": "rio-laundromat/letters/2026/letter-2026-08-12-business-license-renewal.pdf",
+      "type": "letter",
+      "entity": "rio-laundromat",
+      "name": "letter-2026-08-12-business-license-renewal",
+      "date": "2026-08-12",
+      "year": "2026",
+      "amount": null,
+      "pages": 1,
+      "fields": {
+        "sender": "City of Riverside",
+        "date": "2026-08-12",
+        "due_date": "2026-12-31"
+      },
+      "confidence": "high",
+      "source": {
+        "batch": "batch-20260817-141000",
+        "scanner": "brother",
+        "user": "elsa",
+        "host": "Front-Desk-iMac",
+        "scanned": "2026-08-17T14:10:00-0800"
+      },
+      "filed": "2026-08-17T14:32:00-0800",
+      "followups": {
+        "calendar": {
+          "status": "done",
+          "note": "reminder 3 days before",
+          "updated": "2026-08-17T14:34:00-0800",
+          "ref": "evt_901332"
+        }
+      }
+    },
+    {
+      "file": "rio-laundromat/misc/2026/misc-2026-09-14-machine-repair-notes.pdf",
+      "type": "misc",
+      "entity": "rio-laundromat",
+      "name": "misc-2026-09-14-machine-repair-notes",
+      "date": "2026-09-14",
+      "year": "2026",
+      "amount": null,
+      "pages": 2,
+      "fields": {
+        "subject": "Machine repair notes",
+        "date": "2026-09-14"
+      },
+      "confidence": "high",
+      "source": {
+        "batch": "batch-20260916-113000",
+        "scanner": "ix500",
+        "user": "eric",
+        "host": "Erics-MacBook-Pro",
+        "scanned": "2026-09-16T11:30:00-0800"
+      },
+      "filed": "2026-09-16T12:04:00-0800",
+      "followups": {}
+    },
+    {
+      "file": "rio-rapid-wash/receipts/2025/receipt-2025-08-09-harbor-supply-co $84.12.pdf",
+      "type": "receipt",
+      "entity": "rio-rapid-wash",
+      "name": "receipt-2025-08-09-harbor-supply-co $84.12",
+      "date": "2025-08-09",
+      "year": "2025",
+      "amount": 84.12,
+      "pages": 1,
+      "fields": {
+        "vendor": "Harbor Supply Co",
+        "date": "2025-08-09",
+        "total": 84.12
+      },
+      "confidence": "high",
+      "source": {
+        "batch": "batch-20260802-103000",
+        "scanner": "brother",
+        "user": "elsa",
+        "host": "Front-Desk-iMac",
+        "scanned": "2026-08-02T10:30:00-0800"
+      },
+      "filed": "2026-08-02T10:58:00-0800",
+      "followups": {
+        "quickbooks": {
+          "status": "done",
+          "note": null,
+          "updated": "2026-08-02T11:00:00-0800",
+          "ref": "qbo-draft-1238"
+        },
+        "tax_copy": {
+          "status": "done",
+          "note": null,
+          "updated": "2026-08-02T11:00:00-0800",
+          "ref": "Tax/2025"
+        }
+      }
+    },
+    {
+      "file": "rio-rapid-wash/receipts/2026/receipt-2026-01-15-tidewater-chemical $301.45.pdf",
+      "type": "receipt",
+      "entity": "rio-rapid-wash",
+      "name": "receipt-2026-01-15-tidewater-chemical $301.45",
+      "date": "2026-01-15",
+      "year": "2026",
+      "amount": 301.45,
+      "pages": 1,
+      "fields": {
+        "vendor": "Tidewater Chemical",
+        "date": "2026-01-15",
+        "total": 301.45
+      },
+      "confidence": "high",
+      "source": {
+        "batch": "batch-20260620-091200",
+        "scanner": "ix500",
+        "user": "eric",
+        "host": "Erics-MacBook-Pro",
+        "scanned": "2026-06-20T09:12:00-0800"
+      },
+      "filed": "2026-06-20T09:37:00-0800",
+      "followups": {
+        "quickbooks": {
+          "status": "done",
+          "note": null,
+          "updated": "2026-06-20T09:39:00-0800",
+          "ref": "qbo-draft-1239"
+        },
+        "tax_copy": {
+          "status": "done",
+          "note": null,
+          "updated": "2026-06-20T09:39:00-0800",
+          "ref": "Tax/2026"
+        }
+      }
+    },
+    {
+      "file": "rio-rapid-wash/receipts/2026/receipt-2026-05-28-fernwood-hardware $27.99.pdf",
+      "type": "receipt",
+      "entity": "rio-rapid-wash",
+      "name": "receipt-2026-05-28-fernwood-hardware $27.99",
+      "date": "2026-05-28",
+      "year": "2026",
+      "amount": 27.99,
+      "pages": 1,
+      "fields": {
+        "vendor": "Fernwood Hardware",
+        "date": "2026-05-28",
+        "total": 27.99
+      },
+      "confidence": "high",
+      "source": {
+        "batch": "batch-20260711-140500",
+        "scanner": "ix500",
+        "user": "ariel",
+        "host": "Ariels-MacBook-Air",
+        "scanned": "2026-07-11T14:05:00-0800"
+      },
+      "filed": "2026-07-11T14:33:00-0800",
+      "followups": {
+        "quickbooks": {
+          "status": "done",
+          "note": null,
+          "updated": "2026-07-11T14:35:00-0800",
+          "ref": "qbo-draft-1240"
+        },
+        "tax_copy": {
+          "status": "done",
+          "note": null,
+          "updated": "2026-07-11T14:35:00-0800",
+          "ref": "Tax/2026"
+        }
+      }
+    },
+    {
+      "file": "rio-rapid-wash/receipts/2026/receipt-2026-09-12-harbor-supply-co $158.30.pdf",
+      "type": "receipt",
+      "entity": "rio-rapid-wash",
+      "name": "receipt-2026-09-12-harbor-supply-co $158.30",
+      "date": "2026-09-12",
+      "year": "2026",
+      "amount": 158.3,
+      "pages": 1,
+      "fields": {
+        "vendor": "Harbor Supply Co",
+        "date": "2026-09-12",
+        "total": 158.3
+      },
+      "confidence": "low",
+      "source": {
+        "batch": "batch-20260914-145000",
+        "scanner": "brother",
+        "user": "ariel",
+        "host": "Ariels-MacBook-Air",
+        "scanned": "2026-09-14T14:50:00-0800"
+      },
+      "filed": "2026-09-14T15:20:00-0800",
+      "followups": {
+        "quickbooks": {
+          "status": "done",
+          "note": null,
+          "updated": "2026-09-14T15:22:00-0800",
+          "ref": "qbo-draft-1241"
+        },
+        "tax_copy": {
+          "status": "done",
+          "note": null,
+          "updated": "2026-09-14T15:22:00-0800",
+          "ref": "Tax/2026"
+        }
+      }
+    },
+    {
+      "file": "rio-rapid-wash/invoices/2026/invoice-2026-02-28-bluewater-utilities $988.40.pdf",
+      "type": "invoice",
+      "entity": "rio-rapid-wash",
+      "name": "invoice-2026-02-28-bluewater-utilities $988.40",
+      "date": "2026-02-28",
+      "year": "2026",
+      "amount": 988.4,
+      "pages": 2,
+      "fields": {
+        "vendor": "Bluewater Utilities",
+        "date": "2026-02-28",
+        "total": 988.4,
+        "invoice_number": "INV-40481",
+        "due_date": "2026-03-20"
+      },
+      "confidence": "high",
+      "source": {
+        "batch": "batch-20260620-091200",
+        "scanner": "ix500",
+        "user": "eric",
+        "host": "Erics-MacBook-Pro",
+        "scanned": "2026-06-20T09:12:00-0800"
+      },
+      "filed": "2026-06-20T09:33:00-0800",
+      "followups": {
+        "quickbooks": {
+          "status": "done",
+          "note": null,
+          "updated": "2026-06-20T09:35:00-0800",
+          "ref": "qbo-draft-1242"
+        },
+        "tax_copy": {
+          "status": "done",
+          "note": null,
+          "updated": "2026-06-20T09:35:00-0800",
+          "ref": "Tax/2026"
+        },
+        "calendar": {
+          "status": "done",
+          "note": "reminder 3 days before",
+          "updated": "2026-06-20T09:35:00-0800",
+          "ref": "evt_901554"
+        }
+      }
+    },
+    {
+      "file": "rio-rapid-wash/invoices/2026/invoice-2026-11-01-bluewater-utilities $1012.55.pdf",
+      "type": "invoice",
+      "entity": "rio-rapid-wash",
+      "name": "invoice-2026-11-01-bluewater-utilities $1012.55",
+      "date": "2026-11-01",
+      "year": "2026",
+      "amount": 1012.55,
+      "pages": 2,
+      "fields": {
+        "vendor": "Bluewater Utilities",
+        "date": "2026-11-01",
+        "total": 1012.55,
+        "invoice_number": "INV-48120",
+        "due_date": "2026-12-01"
+      },
+      "confidence": "high",
+      "source": {
+        "batch": "batch-20261103-090500",
+        "scanner": "ix500",
+        "user": "eric",
+        "host": "Erics-MacBook-Pro",
+        "scanned": "2026-11-03T09:05:00-0800"
+      },
+      "filed": "2026-11-03T09:26:00-0800",
+      "followups": {
+        "quickbooks": {
+          "status": "pending",
+          "note": null,
+          "updated": "2026-11-03T09:28:00-0800",
+          "ref": null
+        },
+        "tax_copy": {
+          "status": "done",
+          "note": null,
+          "updated": "2026-11-03T09:28:00-0800",
+          "ref": "Tax/2026"
+        },
+        "calendar": {
+          "status": "done",
+          "note": "reminder 3 days before",
+          "updated": "2026-11-03T09:28:00-0800",
+          "ref": "evt_901591"
+        }
+      }
+    },
+    {
+      "file": "rio-rapid-wash/statements/2026/statement-2026-08-31-business-checking.pdf",
+      "type": "statement",
+      "entity": "rio-rapid-wash",
+      "name": "statement-2026-08-31-business-checking",
+      "date": "2026-08-31",
+      "year": "2026",
+      "amount": null,
+      "pages": 3,
+      "fields": {
+        "institution": "Northgate Bank",
+        "period_end": "2026-08-31",
+        "account": "ending 4482"
+      },
+      "confidence": "high",
+      "source": {
+        "batch": "batch-20260903-105500",
+        "scanner": "brother",
+        "user": "eric",
+        "host": "Erics-MacBook-Pro",
+        "scanned": "2026-09-03T10:55:00-0800"
+      },
+      "filed": "2026-09-03T11:17:00-0800",
+      "followups": {}
+    },
+    {
+      "file": "rio-rapid-wash/contracts/2026/contract-2026-04-01-lease-amendment.pdf",
+      "type": "contract",
+      "entity": "rio-rapid-wash",
+      "name": "contract-2026-04-01-lease-amendment",
+      "date": "2026-04-01",
+      "year": "2026",
+      "amount": null,
+      "pages": 6,
+      "fields": {
+        "party": "Westfield Plaza",
+        "effective_date": "2026-04-01",
+        "term_months": 36
+      },
+      "confidence": "high",
+      "source": {
+        "batch": "batch-20260620-091200",
+        "scanner": "ix500",
+        "user": "eric",
+        "host": "Erics-MacBook-Pro",
+        "scanned": "2026-06-20T09:12:00-0800"
+      },
+      "filed": "2026-06-20T09:49:00-0800",
+      "followups": {}
+    },
+    {
+      "file": "rio-rapid-wash/taxes/2026/tax-2026-03-12-form-1120-s-2025.pdf",
+      "type": "tax",
+      "entity": "rio-rapid-wash",
+      "name": "tax-2026-03-12-form-1120-s-2025",
+      "date": "2026-03-12",
+      "year": "2026",
+      "amount": null,
+      "pages": 18,
+      "fields": {
+        "form": "1120-S",
+        "tax_year": 2025,
+        "date": "2026-03-12"
+      },
+      "confidence": "high",
+      "source": {
+        "batch": "batch-20260711-140500",
+        "scanner": "ix500",
+        "user": "ariel",
+        "host": "Ariels-MacBook-Air",
+        "scanned": "2026-07-11T14:05:00-0800"
+      },
+      "filed": "2026-07-11T14:36:00-0800",
+      "followups": {
+        "tax_copy": {
+          "status": "done",
+          "note": null,
+          "updated": "2026-07-11T14:38:00-0800",
+          "ref": "Tax/2026"
+        }
+      }
+    },
+    {
+      "file": "rio-rapid-wash/letters/2025/letter-2025-11-18-sales-tax-notice.pdf",
+      "type": "letter",
+      "entity": "rio-rapid-wash",
+      "name": "letter-2025-11-18-sales-tax-notice",
+      "date": "2025-11-18",
+      "year": "2025",
+      "amount": null,
+      "pages": 1,
+      "fields": {
+        "sender": "State Comptroller",
+        "date": "2025-11-18",
+        "due_date": "2025-12-15"
+      },
+      "confidence": "high",
+      "source": {
+        "batch": "batch-20260802-103000",
+        "scanner": "brother",
+        "user": "elsa",
+        "host": "Front-Desk-iMac",
+        "scanned": "2026-08-02T10:30:00-0800"
+      },
+      "filed": "2026-08-02T11:05:00-0800",
+      "followups": {
+        "calendar": {
+          "status": "done",
+          "note": "reminder 3 days before",
+          "updated": "2026-08-02T11:07:00-0800",
+          "ref": "evt_901739"
+        }
+      }
+    },
+    {
+      "file": "rio-cycles/receipts/2025/receipt-2025-10-04-spoke-and-chain-distributors $512.80.pdf",
+      "type": "receipt",
+      "entity": "rio-cycles",
+      "name": "receipt-2025-10-04-spoke-and-chain-distributors $512.80",
+      "date": "2025-10-04",
+      "year": "2025",
+      "amount": 512.8,
+      "pages": 1,
+      "fields": {
+        "vendor": "Spoke & Chain Distributors",
+        "date": "2025-10-04",
+        "total": 512.8
+      },
+      "confidence": "high",
+      "source": {
+        "batch": "batch-20260620-091200",
+        "scanner": "ix500",
+        "user": "eric",
+        "host": "Erics-MacBook-Pro",
+        "scanned": "2026-06-20T09:12:00-0800"
+      },
+      "filed": "2026-06-20T09:34:00-0800",
+      "followups": {
+        "quickbooks": {
+          "status": "done",
+          "note": null,
+          "updated": "2026-06-20T09:36:00-0800",
+          "ref": "qbo-draft-1248"
+        },
+        "tax_copy": {
+          "status": "done",
+          "note": null,
+          "updated": "2026-06-20T09:36:00-0800",
+          "ref": "Tax/2025"
+        }
+      }
+    },
+    {
+      "file": "rio-cycles/receipts/2026/receipt-2026-03-22-spoke-and-chain-distributors $276.15.pdf",
+      "type": "receipt",
+      "entity": "rio-cycles",
+      "name": "receipt-2026-03-22-spoke-and-chain-distributors $276.15",
+      "date": "2026-03-22",
+      "year": "2026",
+      "amount": 276.15,
+      "pages": 1,
+      "fields": {
+        "vendor": "Spoke & Chain Distributors",
+        "date": "2026-03-22",
+        "total": 276.15
+      },
+      "confidence": "high",
+      "source": {
+        "batch": "batch-20260711-140500",
+        "scanner": "ix500",
+        "user": "ariel",
+        "host": "Ariels-MacBook-Air",
+        "scanned": "2026-07-11T14:05:00-0800"
+      },
+      "filed": "2026-07-11T14:24:00-0800",
+      "followups": {
+        "quickbooks": {
+          "status": "done",
+          "note": null,
+          "updated": "2026-07-11T14:26:00-0800",
+          "ref": "qbo-draft-1249"
+        },
+        "tax_copy": {
+          "status": "done",
+          "note": null,
+          "updated": "2026-07-11T14:26:00-0800",
+          "ref": "Tax/2026"
+        }
+      }
+    },
+    {
+      "file": "rio-cycles/receipts/2026/receipt-2026-07-19-granite-freight $95.00.pdf",
+      "type": "receipt",
+      "entity": "rio-cycles",
+      "name": "receipt-2026-07-19-granite-freight $95.00",
+      "date": "2026-07-19",
+      "year": "2026",
+      "amount": 95,
+      "pages": 1,
+      "fields": {
+        "vendor": "Granite Freight",
+        "date": "2026-07-19",
+        "total": 95
+      },
+      "confidence": "high",
+      "source": {
+        "batch": "batch-20260721-123500",
+        "scanner": "ix500",
+        "user": "ariel",
+        "host": "Ariels-MacBook-Air",
+        "scanned": "2026-07-21T12:35:00-0800"
+      },
+      "filed": "2026-07-21T13:00:00-0800",
+      "followups": {
+        "quickbooks": {
+          "status": "done",
+          "note": null,
+          "updated": "2026-07-21T13:02:00-0800",
+          "ref": "qbo-draft-1250"
+        },
+        "tax_copy": {
+          "status": "done",
+          "note": null,
+          "updated": "2026-07-21T13:02:00-0800",
+          "ref": "Tax/2026"
+        }
+      }
+    },
+    {
+      "file": "rio-cycles/invoices/2026/invoice-2026-06-15-alder-bike-parts $1875.60.pdf",
+      "type": "invoice",
+      "entity": "rio-cycles",
+      "name": "invoice-2026-06-15-alder-bike-parts $1875.60",
+      "date": "2026-06-15",
+      "year": "2026",
+      "amount": 1875.6,
+      "pages": 1,
+      "fields": {
+        "vendor": "Alder Bike Parts",
+        "date": "2026-06-15",
+        "total": 1875.6,
+        "invoice_number": "INV-45265",
+        "due_date": "2026-07-15"
+      },
+      "confidence": "high",
+      "source": {
+        "batch": "batch-20260618-103500",
+        "scanner": "ix500",
+        "user": "ariel",
+        "host": "Ariels-MacBook-Air",
+        "scanned": "2026-06-18T10:35:00-0800"
+      },
+      "filed": "2026-06-18T10:55:00-0800",
+      "followups": {
+        "quickbooks": {
+          "status": "done",
+          "note": null,
+          "updated": "2026-06-18T10:57:00-0800",
+          "ref": "qbo-draft-1251"
+        },
+        "tax_copy": {
+          "status": "done",
+          "note": null,
+          "updated": "2026-06-18T10:57:00-0800",
+          "ref": "Tax/2026"
+        },
+        "calendar": {
+          "status": "done",
+          "note": "reminder 3 days before",
+          "updated": "2026-06-18T10:57:00-0800",
+          "ref": "evt_901887"
+        }
+      }
+    },
+    {
+      "file": "rio-cycles/invoices/2026/invoice-2026-10-20-alder-bike-parts $2140.00.pdf",
+      "type": "invoice",
+      "entity": "rio-cycles",
+      "name": "invoice-2026-10-20-alder-bike-parts $2140.00",
+      "date": "2026-10-20",
+      "year": "2026",
+      "amount": 2140,
+      "pages": 2,
+      "fields": {
+        "vendor": "Alder Bike Parts",
+        "date": "2026-10-20",
+        "total": 2140,
+        "invoice_number": "INV-45168",
+        "due_date": "2026-11-03"
+      },
+      "confidence": "high",
+      "source": {
+        "batch": "batch-20261022-100500",
+        "scanner": "brother",
+        "user": "ariel",
+        "host": "Ariels-MacBook-Air",
+        "scanned": "2026-10-22T10:05:00-0800"
+      },
+      "filed": "2026-10-22T10:36:00-0800",
+      "followups": {
+        "quickbooks": {
+          "status": "done",
+          "note": null,
+          "updated": "2026-10-22T10:38:00-0800",
+          "ref": "qbo-draft-1252"
+        },
+        "tax_copy": {
+          "status": "done",
+          "note": null,
+          "updated": "2026-10-22T10:38:00-0800",
+          "ref": "Tax/2026"
+        },
+        "calendar": {
+          "status": "done",
+          "note": "reminder 3 days before",
+          "updated": "2026-10-22T10:38:00-0800",
+          "ref": "evt_901924"
+        }
+      }
+    },
+    {
+      "file": "rio-cycles/statements/2025/statement-2025-12-31-business-checking.pdf",
+      "type": "statement",
+      "entity": "rio-cycles",
+      "name": "statement-2025-12-31-business-checking",
+      "date": "2025-12-31",
+      "year": "2025",
+      "amount": null,
+      "pages": 3,
+      "fields": {
+        "institution": "Northgate Bank",
+        "period_end": "2025-12-31",
+        "account": "ending 7426"
+      },
+      "confidence": "high",
+      "source": {
+        "batch": "batch-20260802-103000",
+        "scanner": "brother",
+        "user": "elsa",
+        "host": "Front-Desk-iMac",
+        "scanned": "2026-08-02T10:30:00-0800"
+      },
+      "filed": "2026-08-02T11:06:00-0800",
+      "followups": {}
+    },
+    {
+      "file": "rio-cycles/taxes/2026/tax-2026-02-20-form-1099-nec-2025.pdf",
+      "type": "tax",
+      "entity": "rio-cycles",
+      "name": "tax-2026-02-20-form-1099-nec-2025",
+      "date": "2026-02-20",
+      "year": "2026",
+      "amount": null,
+      "pages": 4,
+      "fields": {
+        "form": "1099-NEC",
+        "tax_year": 2025,
+        "date": "2026-02-20"
+      },
+      "confidence": "high",
+      "source": {
+        "batch": "batch-20260620-091200",
+        "scanner": "ix500",
+        "user": "eric",
+        "host": "Erics-MacBook-Pro",
+        "scanned": "2026-06-20T09:12:00-0800"
+      },
+      "filed": "2026-06-20T09:35:00-0800",
+      "followups": {
+        "tax_copy": {
+          "status": "done",
+          "note": null,
+          "updated": "2026-06-20T09:37:00-0800",
+          "ref": "Tax/2026"
+        }
+      }
+    },
+    {
+      "file": "rio-cycles/misc/2026/misc-2026-06-30-inventory-count-sheet.pdf",
+      "type": "misc",
+      "entity": "rio-cycles",
+      "name": "misc-2026-06-30-inventory-count-sheet",
+      "date": "2026-06-30",
+      "year": "2026",
+      "amount": null,
+      "pages": 3,
+      "fields": {
+        "subject": "Inventory count sheet",
+        "date": "2026-06-30"
+      },
+      "confidence": "high",
+      "source": {
+        "batch": "batch-20260702-123000",
+        "scanner": "brother",
+        "user": "elsa",
+        "host": "Front-Desk-iMac",
+        "scanned": "2026-07-02T12:30:00-0800"
+      },
+      "filed": "2026-07-02T13:04:00-0800",
+      "followups": {}
+    },
+    {
+      "file": "aqualoop/receipts/2025/receipt-2025-09-25-tidewater-chemical $244.10.pdf",
+      "type": "receipt",
+      "entity": "aqualoop",
+      "name": "receipt-2025-09-25-tidewater-chemical $244.10",
+      "date": "2025-09-25",
+      "year": "2025",
+      "amount": 244.1,
+      "pages": 1,
+      "fields": {
+        "vendor": "Tidewater Chemical",
+        "date": "2025-09-25",
+        "total": 244.1
+      },
+      "confidence": "high",
+      "source": {
+        "batch": "batch-20260802-103000",
+        "scanner": "brother",
+        "user": "elsa",
+        "host": "Front-Desk-iMac",
+        "scanned": "2026-08-02T10:30:00-0800"
+      },
+      "filed": "2026-08-02T11:05:00-0800",
+      "followups": {
+        "quickbooks": {
+          "status": "done",
+          "note": null,
+          "updated": "2026-08-02T11:07:00-0800",
+          "ref": "qbo-draft-1256"
+        },
+        "tax_copy": {
+          "status": "done",
+          "note": null,
+          "updated": "2026-08-02T11:07:00-0800",
+          "ref": "Tax/2025"
+        }
+      }
+    },
+    {
+      "file": "aqualoop/receipts/2026/receipt-2026-04-03-harbor-supply-co $132.77.pdf",
+      "type": "receipt",
+      "entity": "aqualoop",
+      "name": "receipt-2026-04-03-harbor-supply-co $132.77",
+      "date": "2026-04-03",
+      "year": "2026",
+      "amount": 132.77,
+      "pages": 1,
+      "fields": {
+        "vendor": "Harbor Supply Co",
+        "date": "2026-04-03",
+        "total": 132.77
+      },
+      "confidence": "high",
+      "source": {
+        "batch": "batch-20260620-091200",
+        "scanner": "ix500",
+        "user": "eric",
+        "host": "Erics-MacBook-Pro",
+        "scanned": "2026-06-20T09:12:00-0800"
+      },
+      "filed": "2026-06-20T09:38:00-0800",
+      "followups": {
+        "quickbooks": {
+          "status": "done",
+          "note": null,
+          "updated": "2026-06-20T09:40:00-0800",
+          "ref": "qbo-draft-1257"
+        },
+        "tax_copy": {
+          "status": "done",
+          "note": null,
+          "updated": "2026-06-20T09:40:00-0800",
+          "ref": "Tax/2026"
+        }
+      }
+    },
+    {
+      "file": "aqualoop/receipts/2026/receipt-2026-10-12-quarry-signworks $480.00.pdf",
+      "type": "receipt",
+      "entity": "aqualoop",
+      "name": "receipt-2026-10-12-quarry-signworks $480.00",
+      "date": "2026-10-12",
+      "year": "2026",
+      "amount": 480,
+      "pages": 1,
+      "fields": {
+        "vendor": "Quarry Signworks",
+        "date": "2026-10-12",
+        "total": 480
+      },
+      "confidence": "high",
+      "source": {
+        "batch": "batch-20261014-133500",
+        "scanner": "brother",
+        "user": "eric",
+        "host": "Erics-MacBook-Pro",
+        "scanned": "2026-10-14T13:35:00-0800"
+      },
+      "filed": "2026-10-14T14:10:00-0800",
+      "followups": {
+        "quickbooks": {
+          "status": "done",
+          "note": null,
+          "updated": "2026-10-14T14:12:00-0800",
+          "ref": "qbo-draft-1258"
+        },
+        "tax_copy": {
+          "status": "done",
+          "note": null,
+          "updated": "2026-10-14T14:12:00-0800",
+          "ref": "Tax/2026"
+        }
+      }
+    },
+    {
+      "file": "aqualoop/invoices/2026/invoice-2026-01-31-bluewater-utilities $1105.20.pdf",
+      "type": "invoice",
+      "entity": "aqualoop",
+      "name": "invoice-2026-01-31-bluewater-utilities $1105.20",
+      "date": "2026-01-31",
+      "year": "2026",
+      "amount": 1105.2,
+      "pages": 2,
+      "fields": {
+        "vendor": "Bluewater Utilities",
+        "date": "2026-01-31",
+        "total": 1105.2,
+        "invoice_number": "INV-47383",
+        "due_date": "2026-02-20"
+      },
+      "confidence": "high",
+      "source": {
+        "batch": "batch-20260802-103000",
+        "scanner": "brother",
+        "user": "elsa",
+        "host": "Front-Desk-iMac",
+        "scanned": "2026-08-02T10:30:00-0800"
+      },
+      "filed": "2026-08-02T11:01:00-0800",
+      "followups": {
+        "quickbooks": {
+          "status": "done",
+          "note": null,
+          "updated": "2026-08-02T11:03:00-0800",
+          "ref": "qbo-draft-1259"
+        },
+        "tax_copy": {
+          "status": "done",
+          "note": null,
+          "updated": "2026-08-02T11:03:00-0800",
+          "ref": "Tax/2026"
+        },
+        "calendar": {
+          "status": "done",
+          "note": "reminder 3 days before",
+          "updated": "2026-08-02T11:03:00-0800",
+          "ref": "evt_902183"
+        }
+      }
+    },
+    {
+      "file": "aqualoop/invoices/2026/invoice-2026-11-04-coastline-waste-services $296.00.pdf",
+      "type": "invoice",
+      "entity": "aqualoop",
+      "name": "invoice-2026-11-04-coastline-waste-services $296.00",
+      "date": "2026-11-04",
+      "year": "2026",
+      "amount": 296,
+      "pages": 1,
+      "fields": {
+        "vendor": "Coastline Waste Services",
+        "date": "2026-11-04",
+        "total": 296,
+        "invoice_number": "INV-40237",
+        "due_date": "2026-12-04"
+      },
+      "confidence": "high",
+      "source": {
+        "batch": "batch-20261107-114000",
+        "scanner": "brother",
+        "user": "ariel",
+        "host": "Ariels-MacBook-Air",
+        "scanned": "2026-11-07T11:40:00-0800"
+      },
+      "filed": "2026-11-07T12:07:00-0800",
+      "followups": {
+        "quickbooks": {
+          "status": "pending",
+          "note": null,
+          "updated": "2026-11-07T12:09:00-0800",
+          "ref": null
+        },
+        "tax_copy": {
+          "status": "done",
+          "note": null,
+          "updated": "2026-11-07T12:09:00-0800",
+          "ref": "Tax/2026"
+        },
+        "calendar": {
+          "status": "done",
+          "note": "reminder 3 days before",
+          "updated": "2026-11-07T12:09:00-0800",
+          "ref": "evt_902220"
+        }
+      }
+    },
+    {
+      "file": "aqualoop/contracts/2025/contract-2025-07-15-service-agreement.pdf",
+      "type": "contract",
+      "entity": "aqualoop",
+      "name": "contract-2025-07-15-service-agreement",
+      "date": "2025-07-15",
+      "year": "2025",
+      "amount": null,
+      "pages": 8,
+      "fields": {
+        "party": "Kessler Laundry Equipment",
+        "effective_date": "2025-07-15",
+        "term_months": 12
+      },
+      "confidence": "high",
+      "source": {
+        "batch": "batch-20260711-140500",
+        "scanner": "ix500",
+        "user": "ariel",
+        "host": "Ariels-MacBook-Air",
+        "scanned": "2026-07-11T14:05:00-0800"
+      },
+      "filed": "2026-07-11T14:31:00-0800",
+      "followups": {}
+    },
+    {
+      "file": "aqualoop/letters/2026/letter-2026-10-02-inspection-report.pdf",
+      "type": "letter",
+      "entity": "aqualoop",
+      "name": "letter-2026-10-02-inspection-report",
+      "date": "2026-10-02",
+      "year": "2026",
+      "amount": null,
+      "pages": 2,
+      "fields": {
+        "sender": "County Health Department",
+        "date": "2026-10-02",
+        "due_date": "2026-11-10"
+      },
+      "confidence": "high",
+      "source": {
+        "batch": "batch-20261007-104000",
+        "scanner": "brother",
+        "user": "ariel",
+        "host": "Ariels-MacBook-Air",
+        "scanned": "2026-10-07T10:40:00-0800"
+      },
+      "filed": "2026-10-07T11:02:00-0800",
+      "followups": {
+        "calendar": {
+          "status": "failed",
+          "note": "Google Calendar sign-in expired",
+          "updated": "2026-10-07T11:04:00-0800",
+          "ref": null
+        }
+      }
+    },
+    {
+      "file": "aqualoop/statements/2026/statement-2026-09-30-business-checking.pdf",
+      "type": "statement",
+      "entity": "aqualoop",
+      "name": "statement-2026-09-30-business-checking",
+      "date": "2026-09-30",
+      "year": "2026",
+      "amount": null,
+      "pages": 3,
+      "fields": {
+        "institution": "Northgate Bank",
+        "period_end": "2026-09-30",
+        "account": "ending 5074"
+      },
+      "confidence": "high",
+      "source": {
+        "batch": "batch-20261004-104500",
+        "scanner": "ix500",
+        "user": "ariel",
+        "host": "Ariels-MacBook-Air",
+        "scanned": "2026-10-04T10:45:00-0800"
+      },
+      "filed": "2026-10-04T11:12:00-0800",
+      "followups": {}
+    },
+    {
+      "file": "aqualoop/taxes/2026/tax-2026-04-15-form-1120-s-2025.pdf",
+      "type": "tax",
+      "entity": "aqualoop",
+      "name": "tax-2026-04-15-form-1120-s-2025",
+      "date": "2026-04-15",
+      "year": "2026",
+      "amount": null,
+      "pages": 19,
+      "fields": {
+        "form": "1120-S",
+        "tax_year": 2025,
+        "date": "2026-04-15"
+      },
+      "confidence": "high",
+      "source": {
+        "batch": "batch-20260711-140500",
+        "scanner": "ix500",
+        "user": "ariel",
+        "host": "Ariels-MacBook-Air",
+        "scanned": "2026-07-11T14:05:00-0800"
+      },
+      "filed": "2026-07-11T14:33:00-0800",
+      "followups": {
+        "tax_copy": {
+          "status": "done",
+          "note": null,
+          "updated": "2026-07-11T14:35:00-0800",
+          "ref": "Tax/2026"
+        }
+      }
+    }
+  ],
+  "paychecks": [
+    {
+      "file": "rio-laundromat/paychecks/2026/checks20260919.pdf",
+      "entity": "rio-laundromat",
+      "paydate": "2026-09-19",
+      "checks": [
+        {
+          "check_number": 2391,
+          "payee": "M. Alvarez",
+          "amount": 1047.4,
+          "signed": true
+        },
+        {
+          "check_number": 2392,
+          "payee": "T. Nguyen",
+          "amount": 565.7,
+          "signed": true
+        },
+        {
+          "check_number": 2393,
+          "payee": "R. Patel",
+          "amount": 1039.46,
+          "signed": true
+        },
+        {
+          "check_number": 2394,
+          "payee": "S. Okafor",
+          "amount": 1262.34,
+          "signed": true
+        },
+        {
+          "check_number": 2395,
+          "payee": "D. Kowalski",
+          "amount": 658.32,
+          "signed": true
+        },
+        {
+          "check_number": 2396,
+          "payee": "L. Brennan",
+          "amount": 705.97,
+          "signed": true
+        },
+        {
+          "check_number": 2397,
+          "payee": "C. Ferreira",
+          "amount": 1379.24,
+          "signed": true
+        },
+        {
+          "check_number": 2398,
+          "payee": "J. Whitlow",
+          "amount": 1011.55,
+          "signed": true
+        }
+      ],
+      "sources": [
+        {
+          "batch": "batch-20260920-094700",
+          "scanner": "ix500",
+          "user": "ariel",
+          "host": "Ariels-MacBook-Air",
+          "scanned": "2026-09-20T09:47:00-0800"
+        }
+      ],
+      "followups": {
+        "check_report": {
+          "status": "done",
+          "note": null,
+          "updated": "2026-09-20T10:12:00-0800",
+          "ref": "checks-report.txt"
+        }
+      }
+    },
+    {
+      "file": "rio-laundromat/paychecks/2026/checks20261003.pdf",
+      "entity": "rio-laundromat",
+      "paydate": "2026-10-03",
+      "checks": [
+        {
+          "check_number": 2399,
+          "payee": "M. Alvarez",
+          "amount": 845.19,
+          "signed": true
+        },
+        {
+          "check_number": 2400,
+          "payee": "T. Nguyen",
+          "amount": 795.19,
+          "signed": true
+        },
+        {
+          "check_number": 2401,
+          "payee": "R. Patel",
+          "amount": 823.29,
+          "signed": true
+        },
+        {
+          "check_number": 2402,
+          "payee": "S. Okafor",
+          "amount": 1174.72,
+          "signed": true
+        },
+        {
+          "check_number": 2403,
+          "payee": "D. Kowalski",
+          "amount": 915.64,
+          "signed": true
+        },
+        {
+          "check_number": 2404,
+          "payee": "L. Brennan",
+          "amount": 719.47,
+          "signed": true
+        },
+        {
+          "check_number": 2405,
+          "payee": "C. Ferreira",
+          "amount": 920.62,
+          "signed": true
+        },
+        {
+          "check_number": 2406,
+          "payee": "J. Whitlow",
+          "amount": 1040.49,
+          "signed": true
+        }
+      ],
+      "sources": [
+        {
+          "batch": "batch-20261004-093300",
+          "scanner": "brother",
+          "user": "eric",
+          "host": "Erics-MacBook-Pro",
+          "scanned": "2026-10-04T09:33:00-0800"
+        }
+      ],
+      "followups": {
+        "check_report": {
+          "status": "done",
+          "note": null,
+          "updated": "2026-10-04T09:58:00-0800",
+          "ref": "checks-report.txt"
+        }
+      }
+    },
+    {
+      "file": "rio-laundromat/paychecks/2026/checks20261017.pdf",
+      "entity": "rio-laundromat",
+      "paydate": "2026-10-17",
+      "checks": [
+        {
+          "check_number": 2407,
+          "payee": "M. Alvarez",
+          "amount": 921.94,
+          "signed": true
+        },
+        {
+          "check_number": 2408,
+          "payee": "T. Nguyen",
+          "amount": 633.69,
+          "signed": true
+        },
+        {
+          "check_number": 2409,
+          "payee": "R. Patel",
+          "amount": 1334.25,
+          "signed": true
+        },
+        {
+          "check_number": 2411,
+          "payee": "D. Kowalski",
+          "amount": 708.69,
+          "signed": true
+        },
+        {
+          "check_number": 2412,
+          "payee": "L. Brennan",
+          "amount": 1090.09,
+          "signed": true
+        },
+        {
+          "check_number": 2413,
+          "payee": "C. Ferreira",
+          "amount": 1123.16,
+          "signed": true
+        },
+        {
+          "check_number": 2414,
+          "payee": "J. Whitlow",
+          "amount": 1141.2,
+          "signed": true
+        }
+      ],
+      "sources": [
+        {
+          "batch": "batch-20261018-094600",
+          "scanner": "ix500",
+          "user": "ariel",
+          "host": "Ariels-MacBook-Air",
+          "scanned": "2026-10-18T09:46:00-0800"
+        }
+      ],
+      "followups": {
+        "check_report": {
+          "status": "done",
+          "note": null,
+          "updated": "2026-10-18T10:11:00-0800",
+          "ref": "checks-report.txt"
+        }
+      }
+    },
+    {
+      "file": "rio-laundromat/paychecks/2026/checks20261031.pdf",
+      "entity": "rio-laundromat",
+      "paydate": "2026-10-31",
+      "checks": [
+        {
+          "check_number": 2415,
+          "payee": "M. Alvarez",
+          "amount": 1060.58,
+          "signed": true
+        },
+        {
+          "check_number": 2416,
+          "payee": "T. Nguyen",
+          "amount": 954.48,
+          "signed": true
+        },
+        {
+          "check_number": 2417,
+          "payee": "R. Patel",
+          "amount": 1038.2,
+          "signed": true
+        },
+        {
+          "check_number": 2418,
+          "payee": "S. Okafor",
+          "amount": 1352.93,
+          "signed": true
+        },
+        {
+          "check_number": 2419,
+          "payee": "D. Kowalski",
+          "amount": 1368.4,
+          "signed": false
+        },
+        {
+          "check_number": 2420,
+          "payee": "L. Brennan",
+          "amount": 1344.18,
+          "signed": true
+        },
+        {
+          "check_number": 2421,
+          "payee": "C. Ferreira",
+          "amount": 654.3,
+          "signed": true
+        },
+        {
+          "check_number": 2422,
+          "payee": "J. Whitlow",
+          "amount": 1040.34,
+          "signed": true
+        }
+      ],
+      "sources": [
+        {
+          "batch": "batch-20261101-093900",
+          "scanner": "brother",
+          "user": "ariel",
+          "host": "Ariels-MacBook-Air",
+          "scanned": "2026-11-01T09:39:00-0800"
+        }
+      ],
+      "followups": {
+        "check_report": {
+          "status": "pending",
+          "note": null,
+          "updated": "2026-11-01T10:04:00-0800",
+          "ref": null
+        }
+      }
+    },
+    {
+      "file": "aqualoop/paychecks/2026/checks20261024.pdf",
+      "entity": "aqualoop",
+      "paydate": "2026-10-24",
+      "checks": [
+        {
+          "check_number": 1102,
+          "payee": "A. Lindqvist",
+          "amount": 614.7,
+          "signed": true
+        },
+        {
+          "check_number": 1103,
+          "payee": "K. Osei",
+          "amount": 570.75,
+          "signed": true
+        },
+        {
+          "check_number": 1104,
+          "payee": "P. Duarte",
+          "amount": 641.32,
+          "signed": true
+        },
+        {
+          "check_number": 1105,
+          "payee": "H. Brandt",
+          "amount": 678.32,
+          "signed": true
+        },
+        {
+          "check_number": 1106,
+          "payee": "N. Ivers",
+          "amount": 639.89,
+          "signed": true
+        }
+      ],
+      "sources": [
+        {
+          "batch": "batch-20261025-092700",
+          "scanner": "brother",
+          "user": "elsa",
+          "host": "Front-Desk-iMac",
+          "scanned": "2026-10-25T09:27:00-0800"
+        }
+      ],
+      "followups": {
+        "check_report": {
+          "status": "done",
+          "note": null,
+          "updated": "2026-10-25T09:52:00-0800",
+          "ref": "checks-report.txt"
+        }
+      }
+    }
+  ],
+  "review": [
+    {
+      "file": "_review/review-batch-20261105-091500-03.pdf",
+      "reason": "total unreadable",
+      "guess": {
+        "type": "receipt",
+        "entity": "rio-laundromat"
+      },
+      "source": {
+        "batch": "batch-20261105-091500",
+        "scanner": "brother",
+        "user": "ariel",
+        "host": "Ariels-MacBook-Air",
+        "scanned": "2026-11-05T09:15:00-0800"
+      }
+    },
+    {
+      "file": "_review/review-batch-20261107-143000-01.pdf",
+      "reason": "two documents fed together; the second one's first page is unclear",
+      "guess": {
+        "type": "statement",
+        "entity": "aqualoop"
+      },
+      "source": {
+        "batch": "batch-20261107-143000",
+        "scanner": "ix500",
+        "user": "elsa",
+        "host": "Front-Desk-iMac",
+        "scanned": "2026-11-07T14:30:00-0800"
+      }
+    },
+    {
+      "file": "_review/review-batch-20261107-143000-04.pdf",
+      "reason": "no entity named on the page",
+      "guess": {
+        "type": "letter",
+        "entity": null
+      },
+      "source": {
+        "batch": "batch-20261107-143000",
+        "scanner": "ix500",
+        "user": "elsa",
+        "host": "Front-Desk-iMac",
+        "scanned": "2026-11-07T14:30:00-0800"
+      }
+    }
+  ]
+}

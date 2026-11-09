@@ -1,0 +1,1589 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<meta name="referrer" content="no-referrer">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'">
+<title>Scans</title>
+<!--
+  scan-it dashboard template. scan-catalog dashboard injects the catalog JSON
+  into the script#catalog block below and writes the result next to the PDFs.
+  Self-contained on purpose: no fonts, scripts or images load from anywhere,
+  because the page holds financial and medical records.
+-->
+<style>
+:root {
+  color-scheme: light;
+  --desk: #dde2e8;
+  --paper: #fdfdfc;
+  --tab: #eaedf1;
+  --tab-hover: #f3f5f7;
+  --edge: rgba(23, 35, 58, .14);
+  --ink: #17233a;
+  --ink-2: #4a5568;
+  --muted: #687080;
+  --rule: #e4e7eb;
+  --grid: #e9ebef;
+  --axis: #c3c9d1;
+  --wash: #f2f4f7;
+  --bar: #44587a;
+  --focus: #2457b8;
+  --shadow: 0 1px 0 rgba(23, 35, 58, .05), 0 18px 40px -22px rgba(23, 35, 58, .35);
+  --t1: #2a78d6; --t2: #eb6834; --t3: #1baf7a; --t4: #eda100;
+  --t5: #e87ba4; --t6: #008300; --t7: #6250d6; --t0: #8f949c;
+  --good: #0ca30c; --warn: #fab219; --crit: #d03b3b;
+  --on-status: #ffffff; --on-warn: #0b0b0b;
+  --sans: "Avenir Next", Avenir, "Segoe UI Variable Text", "Segoe UI", "Noto Sans", Ubuntu, Cantarell, system-ui, sans-serif;
+  --cond: "Avenir Next Condensed", Bahnschrift, "Roboto Condensed", "Arial Narrow", "Noto Sans", system-ui, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --desk: #0e1014; --paper: #1b1d21; --tab: #24272c; --tab-hover: #2b2f35;
+    --edge: rgba(255, 255, 255, .09);
+    --ink: #eceef1; --ink-2: #b6bdc8; --muted: #8c94a0;
+    --rule: #2c2f35; --grid: #2a2d33; --axis: #3d424a; --wash: #23262b;
+    --bar: #8fa1bd; --focus: #86aefc;
+    --shadow: 0 1px 0 rgba(0, 0, 0, .4), 0 22px 48px -24px rgba(0, 0, 0, .8);
+    --t1: #3987e5; --t2: #d95926; --t3: #199e70; --t4: #c98500;
+    --t5: #d55181; --t6: #008300; --t7: #9085e9; --t0: #757a82;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --desk: #0e1014; --paper: #1b1d21; --tab: #24272c; --tab-hover: #2b2f35;
+  --edge: rgba(255, 255, 255, .09);
+  --ink: #eceef1; --ink-2: #b6bdc8; --muted: #8c94a0;
+  --rule: #2c2f35; --grid: #2a2d33; --axis: #3d424a; --wash: #23262b;
+  --bar: #8fa1bd; --focus: #86aefc;
+  --shadow: 0 1px 0 rgba(0, 0, 0, .4), 0 22px 48px -24px rgba(0, 0, 0, .8);
+  --t1: #3987e5; --t2: #d95926; --t3: #199e70; --t4: #c98500;
+  --t5: #d55181; --t6: #008300; --t7: #9085e9; --t0: #757a82;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--desk);
+  color: var(--ink);
+  font: 15px/1.5 var(--sans);
+  -webkit-font-smoothing: antialiased;
+}
+a { color: inherit; text-decoration-line: underline; text-decoration-color: var(--axis); text-decoration-thickness: 1px; text-underline-offset: 3px; }
+a:hover { text-decoration-color: currentColor; }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 3px; }
+button, input, select { font: inherit; color: inherit; }
+[hidden] { display: none !important; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.num { font-variant-numeric: tabular-nums; }
+
+.wrap { max-width: 1240px; margin: 0 auto; padding: 0 24px 40px; }
+
+/* Masthead */
+.mast { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 18px; padding: 26px 4px 18px; }
+.brand { margin: 0; font: 700 28px/1 var(--cond); font-stretch: condensed; letter-spacing: .005em; }
+.mast-meta { margin: 0; color: var(--ink-2); font-size: 13px; }
+.mast-meta b { font-weight: 600; color: var(--ink); }
+.theme { margin-left: auto; }
+.btn {
+  border: 1px solid var(--edge); background: transparent; border-radius: 999px;
+  padding: 4px 12px; font-size: 13px; color: var(--ink-2); cursor: pointer;
+}
+.btn:hover { color: var(--ink); background: var(--tab-hover); }
+
+/* Folder tabs: the entity switcher */
+.tabs {
+  display: flex; gap: 3px; overflow-x: auto; scrollbar-width: none;
+  position: relative; z-index: 2; margin-bottom: -1px; padding: 0 1px;
+}
+.tabs::-webkit-scrollbar { display: none; }
+.tab {
+  flex: none; display: flex; align-items: baseline; gap: 8px;
+  border: 1px solid var(--edge); border-radius: 10px 10px 0 0;
+  background: var(--tab); color: var(--ink-2);
+  padding: 9px 16px 8px; margin-top: 6px; cursor: pointer;
+  font: 600 16px/1.2 var(--cond); font-stretch: condensed; white-space: nowrap;
+}
+.tab:hover { background: var(--tab-hover); color: var(--ink); }
+.tab .n { font: 500 13px/1 var(--sans); color: var(--muted); font-variant-numeric: tabular-nums; }
+.tab[aria-pressed="true"] {
+  background: var(--paper); color: var(--ink); margin-top: 0; padding-top: 13px;
+  border-bottom-color: var(--paper); cursor: default;
+}
+.tab.locked { cursor: default; }
+.tabs:empty + .folder { border-radius: 14px; }
+
+.folder {
+  position: relative; z-index: 1;
+  background: var(--paper); border: 1px solid var(--edge);
+  border-radius: 0 14px 14px 14px; box-shadow: var(--shadow);
+  padding: 40px 44px 52px;
+}
+.lock-note.warn { color: var(--ink); box-shadow: inset 3px 0 0 var(--crit); }
+.lock-note .ic { margin-right: 4px; }
+.lock-note {
+  margin: 0 0 26px; padding: 10px 14px; border-radius: 8px; background: var(--wash);
+  color: var(--ink-2); font-size: 14px; max-width: 70ch;
+}
+
+/* Hero: what needs Eric */
+.needs-h {
+  margin: 0; max-width: 20ch;
+  font: 600 clamp(34px, 5.4vw, 62px)/1.02 var(--cond); font-stretch: condensed;
+  letter-spacing: -.012em; text-wrap: balance;
+}
+.needs-sub { margin: 14px 0 0; font-size: 16px; color: var(--ink-2); max-width: 64ch; }
+.queue { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 290px), 1fr)); gap: 30px 36px; margin-top: 30px; }
+.queue:empty { display: none; }
+.qgroup { border-top: 3px solid var(--ink); padding-top: 12px; min-width: 0; }
+.qgroup h3 { margin: 0; display: flex; justify-content: space-between; gap: 12px; font-size: 16px; font-weight: 600; }
+.qgroup h3 .n { font-variant-numeric: tabular-nums; color: var(--ink-2); font-weight: 500; }
+.qwhat { margin: 2px 0 6px; font-size: 13px; color: var(--muted); }
+.qlist { list-style: none; margin: 0; padding: 0; }
+.qitem { display: grid; grid-template-columns: 18px minmax(0, 1fr); gap: 0 10px; padding: 10px 0; border-top: 1px solid var(--rule); }
+.qitem:first-child { border-top: 0; }
+.qitem .ic { margin-top: 3px; }
+.qtitle { font-weight: 600; overflow-wrap: anywhere; }
+.qmeta { display: flex; flex-wrap: wrap; gap: 0 12px; font-size: 13px; color: var(--ink-2); }
+.qnote { font-size: 13px; color: var(--ink); margin-top: 2px; overflow-wrap: anywhere; }
+.qnote.failed::before { content: "Error: "; font-weight: 600; }
+.qmore { margin-top: 6px; }
+
+/* Status icons */
+.ic { width: 16px; height: 16px; flex: none; display: inline-block; vertical-align: -3px; }
+.ic .bg-good { fill: var(--good); } .ic .bg-warn { fill: var(--warn); }
+.ic .bg-crit { fill: var(--crit); } .ic .bg-muted { fill: var(--muted); }
+.ic .bg-ink { fill: var(--ink-2); }
+.ic .fg { stroke: var(--on-status); fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.ic .fg-dot { fill: var(--on-status); }
+.ic.on-warn .fg { stroke: var(--on-warn); } .ic.on-warn .fg-dot { fill: var(--on-warn); }
+.ic.on-ink .fg-dot { fill: var(--paper); }
+
+/* KPI strip */
+.kpis {
+  display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 1px;
+  background: var(--rule); border-block: 1px solid var(--rule); margin-top: 52px;
+}
+.kpi { background: var(--paper); padding: 16px 18px 18px; min-width: 0; }
+.kpi:first-child { padding-left: 0; }
+.kpi-l { font-size: 13px; color: var(--ink-2); }
+.kpi-v { font: 500 40px/1.1 var(--cond); font-stretch: condensed; margin-top: 4px; overflow-wrap: anywhere; }
+.kpi-v small { font: 500 18px/1 var(--cond); color: var(--ink-2); margin-left: 4px; }
+.kpi-s { font-size: 12.5px; color: var(--muted); margin-top: 2px; }
+
+/* Sections */
+.sec { margin-top: 56px; min-width: 0; }
+.sec-h { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 14px; }
+.sec-h h2 { margin: 0; font: 600 26px/1.15 var(--cond); font-stretch: condensed; }
+.sec-h .tools { margin-left: auto; display: flex; gap: 8px; }
+.sec-note { margin: 4px 0 20px; color: var(--ink-2); font-size: 14px; max-width: 70ch; }
+.sec-note:empty { display: none; }
+.empty { margin: 0; padding: 18px 0; color: var(--ink-2); font-size: 14px; border-top: 1px solid var(--rule); }
+.cols { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr); gap: 0 56px; }
+.sub-h { margin: 0 0 10px; font-size: 14px; font-weight: 600; }
+
+/* Legends */
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 0 0 12px; padding: 0; list-style: none; font-size: 13px; color: var(--ink-2); }
+.legend li { display: inline-flex; align-items: center; gap: 6px; }
+.sw { width: 10px; height: 10px; border-radius: 2px; flex: none; display: inline-block; }
+.t1 { background: var(--t1); } .t2 { background: var(--t2); } .t3 { background: var(--t3); } .t4 { background: var(--t4); }
+.t5 { background: var(--t5); } .t6 { background: var(--t6); } .t7 { background: var(--t7); } .t0 { background: var(--t0); }
+svg .t1 { fill: var(--t1); } svg .t2 { fill: var(--t2); } svg .t3 { fill: var(--t3); } svg .t4 { fill: var(--t4); }
+svg .t5 { fill: var(--t5); } svg .t6 { fill: var(--t6); } svg .t7 { fill: var(--t7); } svg .t0 { fill: var(--t0); }
+
+/* SVG charts */
+.chart { position: relative; width: 100%; }
+.chart svg { display: block; overflow: visible; }
+.chart .gridline { stroke: var(--grid); stroke-width: 1; shape-rendering: crispEdges; }
+.chart .baseline { stroke: var(--axis); stroke-width: 1; shape-rendering: crispEdges; }
+.chart .tick { fill: var(--muted); font: 12px var(--sans); font-variant-numeric: tabular-nums; }
+.chart .tick.yr { fill: var(--ink-2); font-weight: 600; }
+.chart .peak { fill: var(--ink-2); font: 600 12px var(--sans); font-variant-numeric: tabular-nums; }
+.chart .hit { fill: transparent; cursor: default; outline: none; }
+.chart .col { transition: opacity .12s; }
+.chart.hovering .col:not(.hot) { opacity: .4; }
+.chart .hit:focus-visible + .focusring, .chart .focusring { fill: none; }
+.chart .hit:focus-visible { stroke: var(--focus); stroke-width: 2; }
+
+/* Due-date timeline */
+.tl .today { stroke: var(--ink); stroke-width: 1.5; }
+.tl .today-l { fill: var(--ink); font: 600 12px var(--sans); }
+.tl .dot { stroke: var(--paper); stroke-width: 2; }
+.tl .dot.overdue { fill: var(--crit); } .tl .dot.soon { fill: var(--warn); } .tl .dot.later { fill: var(--bar); }
+.tl .band-over { fill: var(--wash); }
+
+.due-list { list-style: none; margin: 8px 0 0; padding: 0; }
+.due-group { margin: 18px 0 0; font-size: 14px; font-weight: 600; }
+.due-item { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; gap: 0 10px; padding: 10px 0; border-top: 1px solid var(--rule); align-items: start; }
+.due-item .ic { margin-top: 3px; }
+.due-rel { font-weight: 600; }
+.due-what { overflow-wrap: anywhere; }
+.due-meta { display: flex; flex-wrap: wrap; gap: 0 12px; font-size: 13px; color: var(--ink-2); }
+.due-amt { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* HTML bar rows (ranked bars) */
+.bars { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
+.bar-row { display: grid; grid-template-columns: minmax(84px, 38%) minmax(0, 1fr); gap: 4px 12px; align-items: center; font-size: 14px; }
+.bar-label { min-width: 0; overflow-wrap: anywhere; color: var(--ink); line-height: 1.25; }
+.bar-label small { display: block; color: var(--muted); font-size: 12px; }
+.bar-track { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.bar { height: 14px; border-radius: 0 4px 4px 0; background: var(--bar); min-width: 2px; flex: none; }
+.bar.t1 { background: var(--t1); } .bar.t2 { background: var(--t2); } .bar.t3 { background: var(--t3); } .bar.t4 { background: var(--t4); }
+.bar.t5 { background: var(--t5); } .bar.t6 { background: var(--t6); } .bar.t7 { background: var(--t7); } .bar.t0 { background: var(--t0); }
+.bar-v { font-size: 13px; color: var(--ink-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.src-grid { display: grid; gap: 26px; }
+
+/* Tables */
+.tbl-wrap { width: 100%; overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: 14px; }
+th { text-align: left; font-weight: 600; font-size: 13px; color: var(--ink-2); padding: 8px 12px 8px 0; border-bottom: 1px solid var(--axis); white-space: nowrap; vertical-align: bottom; }
+td { padding: 10px 12px 10px 0; border-bottom: 1px solid var(--rule); vertical-align: top; }
+th.r, td.r { text-align: right; }
+td.r { font-variant-numeric: tabular-nums; }
+.tv { margin-top: 16px; }
+.tv table { font-size: 13px; }
+.tv td, .tv th { padding: 6px 10px 6px 0; }
+
+/* Entity breakdown */
+.where { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr); gap: 0 56px; align-items: start; }
+.ent-name { font-weight: 600; }
+.ent-kind { display: block; font-size: 12px; color: var(--muted); font-weight: 400; }
+.mix { display: flex; gap: 2px; height: 8px; width: 100%; max-width: 380px; margin-top: 8px; }
+.mix span { height: 100%; flex: none; }
+.mix span:first-child { border-radius: 4px 0 0 4px; }
+.mix span:last-child { border-radius: 0 4px 4px 0; }
+.mix span:only-child { border-radius: 4px; }
+.mix span:hover { filter: brightness(1.12); }
+.ent td:first-child { width: 100%; }
+.ent th:first-child { white-space: normal; }
+.ent td.r, .ent th.r { padding-left: 16px; white-space: nowrap; }
+
+/* Paychecks */
+.strip { display: flex; flex-wrap: wrap; gap: 2px; margin-top: 4px; max-width: 360px; }
+.slot { width: 9px; height: 18px; border-radius: 2px; background: var(--bar); }
+.slot.unsigned { background: var(--warn); }
+.slot.missing { background: transparent; box-shadow: inset 0 0 0 1.5px var(--crit); }
+.strip-key { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 13px; color: var(--ink-2); margin: 0 0 10px; padding: 0; list-style: none; }
+.strip-key li { display: inline-flex; align-items: center; gap: 6px; }
+.strip-key .slot { width: 7px; height: 14px; }
+.flags { display: grid; gap: 2px; font-size: 13px; }
+.flag { display: flex; gap: 6px; align-items: baseline; }
+details.checks summary { cursor: pointer; color: var(--ink-2); font-size: 13px; margin-top: 4px; width: max-content; }
+details.checks ol { margin: 6px 0 0; padding: 0; list-style: none; font-size: 13px; display: grid; gap: 2px; }
+details.checks li { display: grid; grid-template-columns: 4.5em minmax(0, 1fr) auto; gap: 8px; }
+
+/* Documents */
+.filters { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 0 0 14px; }
+.filters input[type="search"] {
+  flex: 1 1 240px; min-width: 0; padding: 8px 12px; border-radius: 8px;
+  border: 1px solid var(--edge); background: var(--paper);
+}
+.filters select {
+  padding: 7px 28px 7px 10px; border-radius: 8px; border: 1px solid var(--edge);
+  background: var(--paper); max-width: 100%; appearance: none; -webkit-appearance: none;
+  background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%), linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+  background-position: right 13px top 50%, right 8px top 50%; background-size: 5px 5px; background-repeat: no-repeat;
+}
+.filters select.set, .filters input.set { border-color: var(--ink-2); }
+.count { font-size: 13px; color: var(--ink-2); margin: 0 0 6px; }
+.docs th button { all: unset; cursor: pointer; display: inline-flex; gap: 4px; }
+.docs th button:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.docs th[aria-sort] button::after { content: ""; border: 4px solid transparent; margin-top: 6px; }
+.docs th[aria-sort="descending"] button::after { border-top-color: currentColor; }
+.docs th[aria-sort="ascending"] button::after { border-bottom-color: currentColor; margin-top: 1px; }
+.docs tbody tr:hover { background: var(--wash); }
+.c-date { white-space: nowrap; width: 7.5em; }
+.c-doc { min-width: 0; }
+.doc-t { font-weight: 600; overflow-wrap: anywhere; }
+.doc-f { display: block; font-size: 12.5px; color: var(--muted); overflow-wrap: anywhere; }
+.lowc { font-size: 12px; color: var(--ink-2); border: 1px solid var(--axis); border-radius: 999px; padding: 0 7px; margin-left: 6px; white-space: nowrap; font-weight: 500; }
+.typ { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.src-u { display: block; } .src-m { display: block; font-size: 12.5px; color: var(--muted); }
+.fus { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 12.5px; color: var(--ink-2); }
+.fu { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.fu .ic { width: 13px; height: 13px; vertical-align: -2px; }
+.ph { display: none; }
+.one-entity .c-ent { display: none; }
+.more { margin-top: 14px; }
+
+.foot { padding: 20px 4px 0; font-size: 12.5px; color: var(--ink-2); max-width: 80ch; }
+
+/* Tooltip */
+.tip {
+  position: fixed; left: 0; top: 0; z-index: 50; pointer-events: none;
+  background: var(--paper); color: var(--ink); border: 1px solid var(--edge);
+  border-radius: 8px; padding: 8px 10px; font-size: 13px; min-width: 140px; max-width: 280px;
+  box-shadow: 0 10px 28px -12px rgba(0, 0, 0, .35);
+}
+.tip-h { font-weight: 600; margin-bottom: 4px; overflow-wrap: anywhere; }
+.tip-r { display: grid; grid-template-columns: 12px auto minmax(0, 1fr); gap: 8px; align-items: center; line-height: 1.6; }
+.tip-r b { font-weight: 600; font-variant-numeric: tabular-nums; }
+.tip-r span:last-child { color: var(--ink-2); overflow-wrap: anywhere; }
+.tip-k { width: 12px; height: 2px; border-radius: 1px; }
+.tip-p { color: var(--ink-2); overflow-wrap: anywhere; }
+
+@media (max-width: 1080px) {
+  .kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .kpi:nth-child(3n + 1) { padding-left: 0; }
+  .kpi:first-child { padding-left: 0; }
+  .docs .c-pages, .docs .c-src { display: none; }
+}
+@media (max-width: 900px) {
+  .cols, .where { grid-template-columns: minmax(0, 1fr); }
+  .folder { padding: 32px 28px 40px; }
+}
+@media (max-width: 760px) {
+  .docs thead { display: none; }
+  .docs, .docs tbody { display: block; }
+  .docs tr { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 12px; padding: 12px 0; border-bottom: 1px solid var(--rule); }
+  .docs td { display: block; padding: 0; border: 0; font-size: 13px; color: var(--ink-2); }
+  .docs td.c-doc { order: 0; flex: 1 0 calc(100% - 7em - 12px); min-width: 0; font-size: 14px; color: var(--ink); }
+  .docs td.c-amt { order: 1; flex: 0 0 7em; text-align: right; font-size: 14px; color: var(--ink); }
+  .docs td.c-date { order: 2; width: auto; }
+  .docs td.c-type { order: 3; } .docs td.c-ent { order: 4; }
+  .docs td.c-pages, .docs td.c-src { display: block; }
+  .docs td.c-pages { order: 5; } .docs td.c-src { order: 6; }
+  .docs td.c-fu { order: 7; flex-basis: 100%; margin-top: 4px; }
+  .one-entity .c-ent { display: none !important; }
+  .src-u, .src-m { display: inline; font-size: 13px; color: var(--ink-2); }
+  .src-m::before { content: " on "; }
+  .ph { display: inline; }
+  .pay thead { display: none; }
+  .pay, .pay tbody { display: block; }
+  .pay tr { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 12px; padding: 12px 0; border-bottom: 1px solid var(--rule); }
+  .pay td { padding: 0; border: 0; }
+  .pay td.c-strip, .pay td.c-flags { grid-column: 1 / -1; }
+  .pay td.c-pent { grid-column: 1; font-size: 13px; color: var(--ink-2); }
+}
+@media (max-width: 560px) {
+  .wrap { padding: 0 8px 32px; }
+  .mast { padding: 18px 8px 14px; }
+  .folder { padding: 26px 16px 34px; border-radius: 0 12px 12px 12px; }
+  .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); margin-top: 40px; }
+  .kpi { padding: 14px 12px 14px 14px; }
+  .kpi:nth-child(3n + 1) { padding-left: 14px; }
+  .kpi:nth-child(2n + 1) { padding-left: 0; }
+  .kpi-v { font-size: 32px; }
+  .sec { margin-top: 44px; }
+  .tab { padding: 8px 12px 7px; font-size: 15px; }
+  .tab[aria-pressed="true"] { padding-top: 12px; }
+  .filters select { flex: 1 1 calc(50% - 4px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; }
+}
+@media print {
+  body { background: #fff; }
+  .folder { box-shadow: none; border: 0; padding: 0; }
+  .tabs, .theme, .filters, .more, .tools { display: none !important; }
+}
+@media (forced-colors: active) {
+  .sw, .bar, .slot, .mix span { forced-color-adjust: none; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="mast">
+    <h1 class="brand">Scans</h1>
+    <p class="mast-meta" id="meta"></p>
+    <button class="btn theme" id="theme" type="button">Theme: auto</button>
+  </header>
+
+  <nav class="tabs" id="tabs" aria-label="Show documents for"></nav>
+
+  <main class="folder" id="folder">
+    <p class="lock-note" id="lock-note" hidden></p>
+
+    <section class="needs" aria-labelledby="needs-h">
+      <h2 class="needs-h" id="needs-h">Loading the catalog</h2>
+      <p class="needs-sub" id="needs-sub"></p>
+      <div class="queue" id="queue"></div>
+    </section>
+
+    <section class="kpis" id="kpis" aria-label="Totals"></section>
+
+    <div class="cols">
+      <section class="sec" aria-labelledby="due-h">
+        <header class="sec-h"><h2 id="due-h">Due dates</h2></header>
+        <p class="sec-note" id="due-note"></p>
+        <div id="due-body"></div>
+      </section>
+      <section class="sec" aria-labelledby="src-h">
+        <header class="sec-h"><h2 id="src-h">Who scanned what</h2></header>
+        <p class="sec-note">Filed documents by scanner and by the person at the scanner.</p>
+        <div id="src-body"></div>
+      </section>
+    </div>
+
+    <section class="sec" aria-labelledby="fil-h">
+      <header class="sec-h">
+        <h2 id="fil-h">Filings by month</h2>
+        <div class="tools"><button class="btn" type="button" id="fil-tv" aria-expanded="false">Show as table</button></div>
+      </header>
+      <p class="sec-note" id="fil-note"></p>
+      <div id="fil-body"></div>
+    </section>
+
+    <section class="sec" aria-labelledby="where-h">
+      <header class="sec-h">
+        <h2 id="where-h">Where it's filed</h2>
+        <div class="tools"><button class="btn" type="button" id="where-tv" aria-expanded="false">Show as table</button></div>
+      </header>
+      <p class="sec-note" id="where-note"></p>
+      <div id="where-body"></div>
+    </section>
+
+    <section class="sec" aria-labelledby="pay-h">
+      <header class="sec-h"><h2 id="pay-h">Paychecks</h2></header>
+      <p class="sec-note" id="pay-note"></p>
+      <div id="pay-body"></div>
+    </section>
+
+    <section class="sec" aria-labelledby="docs-h">
+      <header class="sec-h"><h2 id="docs-h">Documents</h2></header>
+      <div id="docs-body"></div>
+    </section>
+  </main>
+
+  <footer class="foot" id="foot">Nothing on this page loads from the network. Links open the PDFs that sit next to this file.</footer>
+</div>
+
+<div class="tip" id="tip" role="tooltip" hidden></div>
+<noscript><p style="padding:16px">This dashboard needs JavaScript to draw its charts and tables.</p></noscript>
+
+<script id="catalog" type="application/json">
+/*__CATALOG__*/
+</script>
+
+<script>
+(function () {
+  'use strict';
+
+  /* ---------- vocabulary ---------- */
+  var TYPES = [
+    { key: 'receipt',   one: 'Receipt',   many: 'Receipts',   cls: 't1' },
+    { key: 'invoice',   one: 'Invoice',   many: 'Invoices',   cls: 't2' },
+    { key: 'statement', one: 'Statement', many: 'Statements', cls: 't3' },
+    { key: 'letter',    one: 'Letter',    many: 'Letters',    cls: 't4' },
+    { key: 'medical',   one: 'Medical',   many: 'Medical',    cls: 't5' },
+    { key: 'tax',       one: 'Tax form',  many: 'Tax forms',  cls: 't6' },
+    { key: 'contract',  one: 'Contract',  many: 'Contracts',  cls: 't7' },
+    { key: 'misc',      one: 'Other',     many: 'Other',      cls: 't0' }
+  ];
+  var TYPE = {};
+  TYPES.forEach(function (t, i) { t.i = i; TYPE[t.key] = t; });
+  function typeOf(k) { return TYPE[k] || TYPE.misc; }
+
+  var WORKFLOWS = [
+    { key: 'quickbooks',   title: 'QuickBooks drafts',  what: 'Business receipts and invoices to draft in QuickBooks.', short: 'QuickBooks' },
+    { key: 'calendar',     title: 'Calendar reminders', what: 'Due dates that still need a Google Calendar reminder.', short: 'Calendar' },
+    { key: 'tax_copy',     title: 'Tax folder copies',  what: "Documents to copy into the entity's Drive Tax folder.", short: 'Tax copy' },
+    { key: 'vault',        title: 'Medical record notes', what: 'Medical documents that need a note in the vault.', short: 'Vault note' },
+    { key: 'check_report', title: 'Paycheck reports',   what: 'Pay runs that still need their check report.', short: 'Check report' }
+  ];
+  var WF = {};
+  WORKFLOWS.forEach(function (w) { WF[w.key] = w; });
+  function wfOf(k) { return WF[k] || { key: k, title: k, what: '', short: k }; }
+  var STATUS_LABEL = { done: 'Done', pending: 'Pending', failed: 'Failed', skipped: 'Skipped' };
+
+  /* ---------- load ---------- */
+  function readCatalog() {
+    var el = document.getElementById('catalog');
+    var raw = el ? el.textContent.trim() : '';
+    if (!raw) return null;
+    try {
+      var c = JSON.parse(raw);
+      return c && typeof c === 'object' && !Array.isArray(c) ? c : null;
+    } catch (e) {
+      return null;
+    }
+  }
+  function arr(x) { return Array.isArray(x) ? x : []; }
+  function isObj(x) { return x && typeof x === 'object' && !Array.isArray(x); }
+
+  var raw = readCatalog();
+  var TEMPLATE = raw === null;
+  raw = raw || {};
+  var C = {
+    generated: typeof raw.generated === 'string' ? raw.generated : '',
+    scope: typeof raw.scope === 'string' && raw.scope ? raw.scope : 'all',
+    prefix: typeof raw.link_prefix === 'string' ? raw.link_prefix : '',
+    entities: arr(raw.entities).filter(function (e) { return isObj(e) && e.slug; }),
+    users: arr(raw.users).filter(function (u) { return isObj(u) && u.slug; }),
+    scanners: arr(raw.scanners).filter(function (s) { return isObj(s) && s.slug; }),
+    documents: arr(raw.documents).filter(function (d) { return isObj(d) && typeof d.file === 'string'; }),
+    paychecks: arr(raw.paychecks).filter(function (p) { return isObj(p) && typeof p.file === 'string'; }),
+    review: arr(raw.review).filter(function (r) { return isObj(r) && typeof r.file === 'string'; })
+  };
+  var LOCKED = C.scope !== 'all';
+
+  /* ---------- helpers ---------- */
+  function $(id) { return document.getElementById(id); }
+  function H(tag, attrs) {
+    var el = document.createElement(tag);
+    if (attrs) {
+      Object.keys(attrs).forEach(function (k) {
+        var v = attrs[k];
+        if (v == null || v === false) return;
+        if (k === 'class') el.className = v;
+        else if (k === 'text') el.textContent = v;
+        else if (k.slice(0, 2) === 'on') el.addEventListener(k.slice(2), v);
+        else el.setAttribute(k, v === true ? '' : String(v));
+      });
+    }
+    for (var i = 2; i < arguments.length; i++) add(el, arguments[i]);
+    return el;
+  }
+  function add(el, kid) {
+    if (kid == null || kid === false) return;
+    if (Array.isArray(kid)) { kid.forEach(function (k) { add(el, k); }); return; }
+    el.append(kid instanceof Node ? kid : document.createTextNode(String(kid)));
+  }
+  var SVGNS = 'http://www.w3.org/2000/svg';
+  function S(tag, attrs) {
+    var el = document.createElementNS(SVGNS, tag);
+    if (attrs) Object.keys(attrs).forEach(function (k) { if (attrs[k] != null) el.setAttribute(k, String(attrs[k])); });
+    for (var i = 2; i < arguments.length; i++) add(el, arguments[i]);
+    return el;
+  }
+  function plural(n, one, many) { return n + ' ' + (n === 1 ? one : (many || one + 's')); }
+
+  /* Dates. YYYY-MM-DD is a local calendar day, never UTC midnight.
+     Timestamps (2026-11-08T10:15:00-0800) are read by parts, not by Date(),
+     because Safari rejects offsets without a colon. */
+  function parseDay(s) {
+    if (typeof s !== 'string') return null;
+    var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s);
+    if (!m) return null;
+    var d = new Date(+m[1], +m[2] - 1, +m[3]);
+    return isNaN(d) || d.getMonth() !== +m[2] - 1 ? null : d;
+  }
+  function stamp(s) {
+    if (typeof s !== 'string') return null;
+    var m = /^(\d{4}-\d{2}-\d{2})(?:[T ](\d{2}):(\d{2}))?/.exec(s);
+    if (!m) return null;
+    return { day: parseDay(m[1]), hh: m[2] != null ? +m[2] : null, mm: m[3] != null ? +m[3] : null };
+  }
+  var NOW = new Date();
+  var TODAY = new Date(NOW.getFullYear(), NOW.getMonth(), NOW.getDate());
+  var THIS_YEAR = String(TODAY.getFullYear());
+  function dayDiff(a, b) { return Math.round((b - a) / 864e5); }
+  var MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  function fmtDay(d, noYear) {
+    if (!d) return '';
+    return MON[d.getMonth()] + ' ' + d.getDate() + (noYear ? '' : ', ' + d.getFullYear());
+  }
+  function fmtDayShort(d) { return d ? fmtDay(d, d.getFullYear() === TODAY.getFullYear()) : ''; }
+  function fmtTime(h, m) {
+    if (h == null) return '';
+    var ap = h < 12 ? 'AM' : 'PM';
+    var hh = h % 12 || 12;
+    return hh + ':' + String(m).padStart(2, '0') + ' ' + ap;
+  }
+  function monthKey(d) { return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0'); }
+
+  var usd = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
+  var usd0 = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
+  var int = new Intl.NumberFormat('en-US');
+  function money(n) { return typeof n === 'number' && isFinite(n) ? usd.format(n) : ''; }
+  function moneyBig(n) {
+    if (!isFinite(n)) return '$0';
+    if (Math.abs(n) >= 1e6) return '$' + (n / 1e6).toFixed(1).replace(/\.0$/, '') + 'M';
+    if (Math.abs(n) >= 1e5) return '$' + Math.round(n / 1e3) + 'K';
+    return usd0.format(n);
+  }
+  function num(n) { return int.format(n || 0); }
+
+  /* Names arrive in whatever case the filer typed; shouting legal names read
+     as noise in a calm UI, so all-caps names are set in title case. */
+  function tidy(n) {
+    if (typeof n !== 'string' || !n) return '';
+    if (n !== n.toUpperCase() || !/[A-Z]{2}/.test(n)) return n;
+    return n.toLowerCase()
+      .replace(/(^|[\s\-\/(&])([a-z])/g, function (m, a, b) { return a + b.toUpperCase(); })
+      .replace(/\b(Llc|Inc|Lp|Llp|Pc|Pllc|Dba|Ltd)\b/g, function (s) { return s.toUpperCase(); });
+  }
+  var ENT = {};
+  C.entities.forEach(function (e) { ENT[e.slug] = e; });
+  function entName(slug) { return ENT[slug] ? tidy(ENT[slug].name) || slug : (slug || 'Unassigned'); }
+  var USER = {};
+  C.users.forEach(function (u) { USER[u.slug] = u; });
+  function userName(slug) { return USER[slug] && USER[slug].name ? USER[slug].name : (slug || 'Unknown'); }
+  var SCANNER = {};
+  C.scanners.forEach(function (s) { SCANNER[s.slug] = s; });
+  function scannerName(slug) { return SCANNER[slug] && SCANNER[slug].model ? SCANNER[slug].model : (slug || 'Unknown'); }
+  function scannerShort(slug) {
+    var m = scannerName(slug);
+    var parts = m.split(/\s+/);
+    return parts.length > 1 ? parts[parts.length - 1] : m;
+  }
+
+  function href(file) {
+    return C.prefix + String(file).split('/').map(encodeURIComponent).join('/');
+  }
+  function baseName(file) { return String(file).split('/').pop().replace(/\.pdf$/i, ''); }
+  function fileLink(file, text, cls) {
+    var a = H('a', { class: cls || null, text: text });
+    a.href = href(file);
+    return a;
+  }
+
+  function docDay(d) { return parseDay(d.date); }
+  function fieldsOf(d) { return isObj(d.fields) ? d.fields : {}; }
+  function docTitle(d) {
+    var f = fieldsOf(d);
+    if (d.type === 'tax' && typeof f.form === 'string' && f.form) {
+      return 'Form ' + f.form + (f.tax_year ? ' (' + f.tax_year + ')' : '');
+    }
+    var keys = ['vendor', 'sender', 'provider', 'institution', 'party', 'issuer', 'subject', 'payee'];
+    for (var i = 0; i < keys.length; i++) {
+      var v = f[keys[i]];
+      if (typeof v === 'string' && v.trim()) return tidy(v.trim());
+    }
+    return prettyName(d.name || baseName(d.file));
+  }
+  function prettyName(n) {
+    var s = String(n || '')
+      .replace(/\s*\$[\d,.]+\s*$/, '')
+      .replace(/^[a-z]+-(\d{4}-\d{2}-\d{2}|undated)-?/, '')
+      .replace(/[-_]+/g, ' ').trim();
+    return s ? s.charAt(0).toUpperCase() + s.slice(1) : 'Untitled';
+  }
+  function dueDay(d) { return parseDay(fieldsOf(d).due_date); }
+  function amountOf(d) { return typeof d.amount === 'number' && isFinite(d.amount) ? d.amount : null; }
+  function pagesOf(d) { return typeof d.pages === 'number' && d.pages > 0 ? d.pages : 0; }
+  function srcOf(x) { return isObj(x.source) ? x.source : (arr(x.sources)[0] || {}); }
+  function fuEntries(x) {
+    var f = isObj(x.followups) ? x.followups : {};
+    return Object.keys(f).filter(function (k) { return isObj(f[k]); }).map(function (k) {
+      return { key: k, status: f[k].status || 'pending', note: f[k].note, updated: f[k].updated, ref: f[k].ref };
+    });
+  }
+  function isMoneyDoc(d) { return d.type === 'receipt' || d.type === 'invoice'; }
+
+  /* ---------- status icon ---------- */
+  var ICONS = {
+    done: ['good', 'check'], pending: ['warn', 'clock'], failed: ['crit', 'bang'], skipped: ['muted', 'dash'],
+    overdue: ['crit', 'bang'], soon: ['warn', 'clock'], later: ['ink', 'dot'], missing: ['crit', 'bang'], unsigned: ['warn', 'bang']
+  };
+  function icon(kind, label) {
+    var spec = ICONS[kind] || ICONS.pending;
+    var svg = S('svg', { viewBox: '0 0 16 16', class: 'ic' + (spec[0] === 'warn' ? ' on-warn' : spec[0] === 'ink' ? ' on-ink' : ''), 'aria-hidden': label ? null : 'true', role: label ? 'img' : null });
+    if (label) svg.append(S('title', null, label));
+    svg.append(S('circle', { cx: 8, cy: 8, r: 7.5, class: 'bg-' + spec[0] }));
+    if (spec[1] === 'check') svg.append(S('path', { d: 'M4.6 8.3l2.2 2.2 4.6-4.8', class: 'fg' }));
+    if (spec[1] === 'clock') svg.append(S('path', { d: 'M8 4.4V8l2.4 1.5', class: 'fg' }));
+    if (spec[1] === 'dash') svg.append(S('path', { d: 'M5 8h6', class: 'fg' }));
+    if (spec[1] === 'dot') svg.append(S('circle', { cx: 8, cy: 8, r: 2.2, class: 'fg-dot' }));
+    if (spec[1] === 'bang') {
+      svg.append(S('path', { d: 'M8 4.3v4.4', class: 'fg' }));
+      svg.append(S('circle', { cx: 8, cy: 11.3, r: 1.05, class: 'fg-dot' }));
+    }
+    return svg;
+  }
+
+  /* ---------- tooltip ---------- */
+  var tip = $('tip');
+  function placeTip(x, y) {
+    var r = tip.getBoundingClientRect();
+    var left = x + 14, top = y + 16;
+    if (left + r.width > window.innerWidth - 8) left = x - r.width - 14;
+    if (left < 8) left = 8;
+    if (top + r.height > window.innerHeight - 8) top = y - r.height - 12;
+    if (top < 8) top = 8;
+    tip.style.transform = 'translate(' + Math.round(left) + 'px,' + Math.round(top) + 'px)';
+  }
+  function showTip(build) { tip.replaceChildren(); add(tip, build()); tip.hidden = false; }
+  function hideTip() { tip.hidden = true; }
+  function bindTip(el, build, onEnter, onLeave) {
+    el.addEventListener('pointerenter', function (e) { showTip(build); placeTip(e.clientX, e.clientY); if (onEnter) onEnter(); });
+    el.addEventListener('pointermove', function (e) { placeTip(e.clientX, e.clientY); });
+    el.addEventListener('pointerleave', function () { hideTip(); if (onLeave) onLeave(); });
+    el.addEventListener('focus', function () {
+      showTip(build);
+      var r = el.getBoundingClientRect();
+      placeTip(r.left + r.width / 2, r.top + r.height / 2);
+      if (onEnter) onEnter();
+    });
+    el.addEventListener('blur', function () { hideTip(); if (onLeave) onLeave(); });
+  }
+  function tipRow(cls, value, label) {
+    return H('div', { class: 'tip-r' },
+      cls ? H('span', { class: 'tip-k ' + cls }) : H('span'),
+      H('b', { text: value }), H('span', { text: label }));
+  }
+  window.addEventListener('scroll', hideTip, { passive: true });
+
+  /* ---------- state ---------- */
+  var state = { entity: LOCKED ? C.scope : 'all', q: '', type: '', year: '', scanner: '', user: '', sortKey: 'date', sortDir: -1, shown: 40 };
+  if (!LOCKED) {
+    try {
+      var m = /(?:^#|&)e=([^&]+)/.exec(location.hash);
+      if (m) {
+        var want = decodeURIComponent(m[1]);
+        if (ENT[want]) state.entity = want;
+      }
+    } catch (e) { /* hash unreadable: stay on All */ }
+  }
+  function inScope(slug) { return state.entity === 'all' || slug === state.entity; }
+  function view() {
+    var docs = C.documents.filter(function (d) { return inScope(d.entity); });
+    var pays = C.paychecks.filter(function (p) { return inScope(p.entity); });
+    var review = C.review.filter(function (r) {
+      var g = isObj(r.guess) ? r.guess.entity : null;
+      return state.entity === 'all' ? !LOCKED || g === C.scope : g === state.entity;
+    });
+    return { docs: docs, pays: pays, review: review };
+  }
+  /* Entities this page may name: in a per-entity copy, only that one. */
+  function visibleEntities() {
+    if (LOCKED) return C.entities.filter(function (e) { return e.slug === C.scope; }).concat(ENT[C.scope] ? [] : [{ slug: C.scope, name: C.scope }]);
+    return C.entities;
+  }
+
+  function setEntity(slug) {
+    if (LOCKED || slug === state.entity) return;
+    state.entity = slug;
+    state.shown = 40;
+    try { history.replaceState(null, '', slug === 'all' ? location.pathname + location.search : '#e=' + encodeURIComponent(slug)); } catch (e) { /* file:// may refuse */ }
+    renderAll();
+  }
+
+  /* ---------- masthead, tabs ---------- */
+  function renderMeta() {
+    var meta = $('meta');
+    meta.replaceChildren();
+    if (TEMPLATE) { meta.textContent = 'Template, not yet filled'; return; }
+    var s = stamp(C.generated);
+    if (s && s.day) {
+      add(meta, ['Catalog built ', H('b', { text: fmtDay(s.day) }), s.hh != null ? ' at ' + fmtTime(s.hh, s.mm) : '']);
+    }
+    if (LOCKED) {
+      var note = $('lock-note');
+      note.hidden = false;
+      /* Only promise the file is clean when it is: the page hides other
+         entities' rows, but they would still sit in the embedded JSON. */
+      var clean = C.entities.every(function (e) { return e.slug === C.scope; }) &&
+        C.documents.every(function (d) { return d.entity === C.scope; }) &&
+        C.paychecks.every(function (p) { return p.entity === C.scope; }) &&
+        C.review.every(function (r) { return isObj(r.guess) && r.guess.entity === C.scope; });
+      if (clean) {
+        note.textContent = 'This copy holds only ' + entName(C.scope) + "'s documents. Other entities, personal and medical records are not in this file.";
+      } else {
+        note.classList.add('warn');
+        add(note, [icon('failed'), ' This copy is meant for ' + entName(C.scope) + ' only, but the file still carries records from other entities. Regenerate it with scan-catalog dashboard before sharing it.']);
+      }
+    }
+  }
+  function renderTabs() {
+    var nav = $('tabs');
+    nav.replaceChildren();
+    if (TEMPLATE) return;
+    var counts = {};
+    C.documents.forEach(function (d) { counts[d.entity] = (counts[d.entity] || 0) + 1; });
+    var list = LOCKED ? [{ slug: C.scope }] : [{ slug: 'all' }].concat(C.entities);
+    list.forEach(function (e) {
+      var n = e.slug === 'all' ? C.documents.length : (counts[e.slug] || 0);
+      var label = e.slug === 'all' ? 'All' : entName(e.slug);
+      var b = H('button', {
+        class: 'tab' + (LOCKED ? ' locked' : ''), type: 'button',
+        'aria-pressed': String(state.entity === e.slug),
+        onclick: function () { setEntity(e.slug); }
+      }, label, H('span', { class: 'n', text: num(n), 'aria-label': plural(n, 'document') }));
+      nav.append(b);
+    });
+    var on = nav.querySelector('[aria-pressed="true"]');
+    if (on && on.scrollIntoView && nav.scrollWidth > nav.clientWidth) {
+      nav.scrollLeft = Math.max(0, on.offsetLeft - 24);
+    }
+  }
+
+  /* ---------- action queue ---------- */
+  function openFollowups(v) {
+    var items = [];
+    v.docs.forEach(function (d) {
+      fuEntries(d).forEach(function (f) {
+        if (f.status === 'pending' || f.status === 'failed') items.push({ f: f, doc: d, entity: d.entity });
+      });
+    });
+    v.pays.forEach(function (p) {
+      fuEntries(p).forEach(function (f) {
+        if (f.status === 'pending' || f.status === 'failed') items.push({ f: f, pay: p, entity: p.entity });
+      });
+    });
+    return items;
+  }
+  function renderNeeds(v) {
+    var items = openFollowups(v);
+    var failed = items.filter(function (i) { return i.f.status === 'failed'; }).length;
+    var overdue = v.docs.filter(function (d) { var dd = dueDay(d); return dd && dayDiff(TODAY, dd) < 0 && dayDiff(TODAY, dd) >= -DUE_BACK; }).length;
+    var h = $('needs-h'), sub = $('needs-sub'), q = $('queue');
+    q.replaceChildren();
+
+    if (TEMPLATE) {
+      h.textContent = 'This is the dashboard template';
+      sub.textContent = 'Run scan-catalog dashboard to fill it with the filed scans. It writes a copy at the scans root and one inside each entity folder.';
+      return;
+    }
+    if (!C.documents.length && !C.paychecks.length && !C.review.length) {
+      h.textContent = 'Nothing filed yet';
+      sub.textContent = 'Scan a stack with scan-batch and file it with batch-file. This page fills in the next time scan-catalog dashboard runs.';
+      return;
+    }
+    var parts = [];
+    if (items.length) parts.push(plural(items.length, 'follow-up') + ' open');
+    if (v.review.length) parts.push(plural(v.review.length, 'scan') + ' to review');
+    h.textContent = parts.length ? parts.join(' and ') : 'Nothing needs you';
+    var s = [];
+    if (failed) s.push(plural(failed, 'follow-up') + ' failed and ' + (failed === 1 ? 'needs' : 'need') + ' a retry; failed items are listed first.');
+    else if (parts.length) s.push('Oldest first in each list. Every name opens its PDF.');
+    else s.push('Every follow-up is done and the review queue is empty.');
+    if (overdue) s.push(plural(overdue, 'due date') + ' passed recently, listed under Due dates.');
+    sub.textContent = s.join(' ');
+
+    var groups = {};
+    items.forEach(function (i) { (groups[i.f.key] = groups[i.f.key] || []).push(i); });
+    var keys = WORKFLOWS.map(function (w) { return w.key; }).filter(function (k) { return groups[k]; })
+      .concat(Object.keys(groups).filter(function (k) { return !WF[k]; }));
+    if (v.review.length) q.append(reviewGroup(v.review));
+    keys.forEach(function (k) {
+      var list = groups[k].sort(function (a, b) {
+        if ((a.f.status === 'failed') !== (b.f.status === 'failed')) return a.f.status === 'failed' ? -1 : 1;
+        return String(a.f.updated || '').localeCompare(String(b.f.updated || ''));
+      });
+      var w = wfOf(k);
+      q.append(queueGroup(w.title, w.what, list.length, list.map(function (i) { return queueItem(i); })));
+    });
+  }
+  function queueGroup(title, what, n, lis) {
+    var LIMIT = 6;
+    var ul = H('ul', { class: 'qlist' });
+    lis.forEach(function (li, i) { if (i >= LIMIT) li.hidden = true; ul.append(li); });
+    var g = H('div', { class: 'qgroup' },
+      H('h3', null, H('span', { text: title }), H('span', { class: 'n', text: num(n) })),
+      what ? H('p', { class: 'qwhat', text: what }) : null, ul);
+    if (lis.length > LIMIT) {
+      var more = H('button', { class: 'btn qmore', type: 'button', text: 'Show ' + (lis.length - LIMIT) + ' more' });
+      more.addEventListener('click', function () { lis.forEach(function (li) { li.hidden = false; }); more.remove(); });
+      g.append(more);
+    }
+    return g;
+  }
+  function queueItem(i) {
+    var f = i.f, meta = [];
+    if (state.entity === 'all') meta.push(H('span', { text: entName(i.entity) }));
+    var title, file;
+    if (i.doc) {
+      title = docTitle(i.doc); file = i.doc.file;
+      var dd = docDay(i.doc);
+      if (dd) meta.push(H('span', { text: fmtDayShort(dd) }));
+      var amt = amountOf(i.doc);
+      if (amt != null) meta.push(H('span', { class: 'num', text: money(amt) }));
+      if (f.key === 'calendar') { var due = dueDay(i.doc); if (due) meta.push(H('span', { text: 'due ' + fmtDayShort(due) })); }
+    } else {
+      var pd = parseDay(i.pay.paydate);
+      title = 'Pay run ' + (pd ? fmtDayShort(pd) : i.pay.paydate || '');
+      file = i.pay.file;
+      meta.push(H('span', { text: plural(arr(i.pay.checks).length, 'check') }));
+    }
+    return H('li', { class: 'qitem' },
+      icon(f.status, STATUS_LABEL[f.status] || f.status),
+      H('div', null,
+        H('div', { class: 'qtitle' }, fileLink(file, title)),
+        H('div', { class: 'qmeta' }, meta),
+        f.note ? H('div', { class: 'qnote' + (f.status === 'failed' ? ' failed' : ''), text: f.note }) : null));
+  }
+  function reviewGroup(list) {
+    var lis = list.slice().sort(function (a, b) {
+      return String(srcOf(a).scanned || '').localeCompare(String(srcOf(b).scanned || ''));
+    }).map(function (r) {
+      var g = isObj(r.guess) ? r.guess : {};
+      var guess = g.type && TYPE[g.type] ? 'Looks like a ' + TYPE[g.type].one.toLowerCase() : 'Type unknown';
+      if (g.entity && (!LOCKED || g.entity === C.scope)) guess += ' for ' + entName(g.entity);
+      else guess += ', entity unknown';
+      var s = srcOf(r), st = stamp(s.scanned);
+      var meta = [H('span', { text: guess })];
+      if (st && st.day) meta.push(H('span', { text: 'scanned ' + fmtDayShort(st.day) + (s.user ? ' by ' + userName(s.user) : '') }));
+      return H('li', { class: 'qitem' },
+        icon('pending', 'Needs review'),
+        H('div', null,
+          H('div', { class: 'qtitle', text: r.reason ? String(r.reason).charAt(0).toUpperCase() + String(r.reason).slice(1) : 'Needs a look' }),
+          H('div', { class: 'qmeta' }, meta),
+          H('div', { class: 'qnote' }, fileLink(r.file, baseName(r.file)))));
+    });
+    return queueGroup('Review queue', "Pages the filer couldn't place. Open each one and file it by hand.", list.length, lis);
+  }
+
+  /* ---------- KPIs ---------- */
+  function renderKpis(v) {
+    var el = $('kpis');
+    el.replaceChildren();
+    var pages = v.docs.reduce(function (s, d) { return s + pagesOf(d); }, 0);
+    var open = openFollowups(v);
+    var failed = open.filter(function (i) { return i.f.status === 'failed'; }).length;
+    var moneyDocs = v.docs.filter(function (d) { return isMoneyDoc(d) && docYear(d) === THIS_YEAR; });
+    var total = moneyDocs.reduce(function (s, d) { return s + (amountOf(d) || 0); }, 0);
+    var first = v.docs.map(docDay).filter(Boolean).sort(function (a, b) { return a - b; })[0];
+
+    function tile(label, value, small, sub) {
+      el.append(H('div', { class: 'kpi' },
+        H('div', { class: 'kpi-l', text: label }),
+        H('div', { class: 'kpi-v' }, value, small ? H('small', { text: small }) : null),
+        H('div', { class: 'kpi-s', text: sub })));
+    }
+    tile('Documents', num(v.docs.length), null, first ? 'dated from ' + MON[first.getMonth()] + ' ' + first.getFullYear() : 'none filed yet');
+    tile('Pages', num(pages), null, v.docs.length ? (pages / v.docs.length).toFixed(1) + ' per document' : 'none scanned yet');
+    if (state.entity === 'all') {
+      var ents = visibleEntities();
+      var withDocs = ents.filter(function (e) { return v.docs.some(function (d) { return d.entity === e.slug; }); }).length;
+      tile('Entities with documents', num(withDocs), ents.length ? 'of ' + num(ents.length) : null,
+        !ents.length ? 'none registered yet' : withDocs === ents.length ? 'every entity has paper' : (ents.length - withDocs) + ' without any yet');
+    } else {
+      var types = {};
+      v.docs.forEach(function (d) { types[typeOf(d.type).key] = 1; });
+      tile('Document types', num(Object.keys(types).length), 'of ' + TYPES.length, 'kinds of paper filed here');
+    }
+    tile('Open follow-ups', num(open.length), null, failed ? plural(failed, 'failed item') : (open.length ? 'none failed' : 'all done'));
+    tile('Review queue', num(v.review.length), null, v.review.length ? 'scans waiting for you' : 'empty');
+    tile('Receipts and invoices', moneyBig(total), null, THIS_YEAR + ' total, ' + plural(moneyDocs.length, 'document'));
+  }
+
+  /* ---------- due dates ---------- */
+  var DUE_BACK = 60, DUE_AHEAD = 60;
+  function dueItems(v) {
+    return v.docs.map(function (d) {
+      var dd = dueDay(d);
+      return dd ? { doc: d, due: dd, n: dayDiff(TODAY, dd) } : null;
+    }).filter(Boolean);
+  }
+  function relDue(n) {
+    if (n === 0) return 'Due today';
+    if (n === 1) return 'Due tomorrow';
+    if (n > 1) return 'Due in ' + n + ' days';
+    if (n === -1) return '1 day overdue';
+    return -n + ' days overdue';
+  }
+  function dueKind(n) { return n < 0 ? 'overdue' : n <= 7 ? 'soon' : 'later'; }
+  function renderDue(v) {
+    var body = $('due-body'), note = $('due-note');
+    body.replaceChildren();
+    var all = dueItems(v);
+    var win = all.filter(function (i) { return i.n >= -DUE_BACK && i.n <= DUE_AHEAD; }).sort(function (a, b) { return a.n - b.n; });
+    var later = all.filter(function (i) { return i.n > DUE_AHEAD; }).length;
+    note.textContent = all.length ? 'Due dates read off invoices and letters, ' + DUE_BACK + ' days back to ' + DUE_AHEAD + ' ahead. Payment is not tracked, so a passed date may already be paid.' : '';
+    if (!all.length) {
+      body.append(H('p', { class: 'empty', text: v.docs.length ? 'No filed document carries a due date.' : 'Due dates appear here once invoices and bills are filed.' }));
+      return;
+    }
+    if (!win.length) {
+      body.append(H('p', { class: 'empty', text: 'Nothing due in the ' + DUE_BACK + ' days behind or the ' + DUE_AHEAD + ' ahead.' + (later ? ' ' + plural(later, 'due date') + ' further out.' : '') }));
+      return;
+    }
+    var chart = H('div', { class: 'chart tl', 'aria-hidden': 'true' });
+    body.append(chart);
+    drawTimeline(chart, win);
+    redraws.push(function () { drawTimeline(chart, win); });
+
+    var over = win.filter(function (i) { return i.n < 0; });
+    var next = win.filter(function (i) { return i.n >= 0; });
+    if (over.length) { body.append(H('h3', { class: 'due-group', text: 'Passed' })); body.append(dueList(over.slice().reverse())); }
+    if (next.length) { body.append(H('h3', { class: 'due-group', text: 'Coming up' })); body.append(dueList(next)); }
+    if (later) body.append(H('p', { class: 'sec-note', text: plural(later, 'more due date') + ' after the next ' + DUE_AHEAD + ' days.' }));
+  }
+  function dueList(list) {
+    var ul = H('ul', { class: 'due-list' });
+    list.forEach(function (i) {
+      var d = i.doc, fu = fuEntries(d).filter(function (f) { return f.key === 'calendar'; })[0];
+      var meta = [H('span', { text: fmtDay(i.due) })];
+      if (state.entity === 'all') meta.push(H('span', { text: entName(d.entity) }));
+      meta.push(H('span', { text: typeOf(d.type).one }));
+      if (fu) meta.push(H('span', { text: fu.status === 'done' ? 'reminder set' : fu.status === 'failed' ? 'reminder failed' : fu.status === 'skipped' ? 'no reminder wanted' : 'no reminder yet' }));
+      var amt = amountOf(d);
+      ul.append(H('li', { class: 'due-item' },
+        icon(dueKind(i.n), i.n < 0 ? 'Overdue' : i.n <= 7 ? 'Due within a week' : 'Due later'),
+        H('div', null,
+          H('div', null, H('span', { class: 'due-rel', text: relDue(i.n) }), ': ', fileLink(d.file, docTitle(d), 'due-what')),
+          H('div', { class: 'due-meta' }, meta)),
+        H('div', { class: 'due-amt', text: amt != null ? money(amt) : '' })));
+    });
+    return ul;
+  }
+  function drawTimeline(host, items) {
+    host.replaceChildren();
+    var W = Math.max(260, host.clientWidth || 600), H0 = 74;
+    var pad = 12, x0 = pad, x1 = W - pad, mid = 30;
+    function x(n) { return x0 + (n + DUE_BACK) / (DUE_BACK + DUE_AHEAD) * (x1 - x0); }
+    var svg = S('svg', { width: W, height: H0, viewBox: '0 0 ' + W + ' ' + H0 });
+    svg.append(S('rect', { x: x0, y: mid - 12, width: x(0) - x0, height: 24, rx: 4, class: 'band-over' }));
+    svg.append(S('line', { x1: x0, x2: x1, y1: mid, y2: mid, class: 'baseline' }));
+    var ticks = W < 420 ? [-DUE_BACK, 0, DUE_AHEAD] : [-DUE_BACK, -30, 0, 30, DUE_AHEAD];
+    ticks.forEach(function (t) {
+      if (t === 0) return;
+      var anchor = t === -DUE_BACK ? 'start' : t === DUE_AHEAD ? 'end' : 'middle';
+      svg.append(S('line', { x1: x(t), x2: x(t), y1: mid - 4, y2: mid + 4, class: 'baseline' }));
+      svg.append(S('text', { x: x(t), y: H0 - 8, 'text-anchor': anchor, class: 'tick' }, t < 0 ? -t + ' days ago' : 'in ' + t + ' days'));
+    });
+    svg.append(S('line', { x1: x(0), x2: x(0), y1: mid - 18, y2: mid + 18, class: 'today' }));
+    svg.append(S('text', { x: x(0), y: H0 - 8, 'text-anchor': 'middle', class: 'today-l' }, 'Today'));
+    /* stack dots that would overlap */
+    var placed = [];
+    items.forEach(function (i) {
+      var cx = x(i.n), row = 0;
+      while (placed.some(function (p) { return p.row === row && Math.abs(p.cx - cx) < 11; })) row++;
+      placed.push({ cx: cx, row: row, i: i });
+    });
+    placed.forEach(function (p) {
+      var cy = mid - p.row * 11 * (p.row % 2 ? 1 : -1) - (p.row % 2 ? 0 : 0);
+      cy = mid + (p.row === 0 ? 0 : (p.row % 2 ? -1 : 1) * Math.ceil(p.row / 2) * 11);
+      var g = S('g');
+      g.append(S('circle', { cx: p.cx, cy: cy, r: 5.5, class: 'dot ' + dueKind(p.i.n) }));
+      var hit = S('circle', { cx: p.cx, cy: cy, r: 12, class: 'hit' });
+      g.append(hit);
+      bindTip(hit, function () {
+        var d = p.i.doc, amt = amountOf(d);
+        return [H('div', { class: 'tip-h', text: docTitle(d) }),
+          H('div', { class: 'tip-p', text: relDue(p.i.n) + ', ' + fmtDay(p.i.due) }),
+          amt != null ? H('div', { class: 'tip-p num', text: money(amt) }) : null,
+          state.entity === 'all' ? H('div', { class: 'tip-p', text: entName(d.entity) }) : null];
+      });
+      svg.append(g);
+    });
+    host.append(svg);
+  }
+
+  /* ---------- sources ---------- */
+  function rankedBars(rows, total, clsFor) {
+    var max = Math.max.apply(null, rows.map(function (r) { return r.n; }).concat([1]));
+    var ul = H('ul', { class: 'bars' });
+    rows.forEach(function (r) {
+      var bar = H('span', { class: 'bar' + (clsFor ? ' ' + clsFor(r) : '') });
+      bar.style.width = 'calc((100% - 5.5em) * ' + (r.n / max).toFixed(4) + ')';
+      var share = total ? Math.round(r.n / total * 100) : 0;
+      ul.append(H('li', { class: 'bar-row' },
+        H('span', { class: 'bar-label' }, r.label, r.sub ? H('small', { text: r.sub }) : null),
+        H('span', { class: 'bar-track' }, bar, H('span', { class: 'bar-v', text: num(r.n) + (total ? ' (' + share + '%)' : '') }))));
+    });
+    return ul;
+  }
+  function countBy(list, fn) {
+    var m = {};
+    list.forEach(function (x) { var k = fn(x) || ''; m[k] = (m[k] || 0) + 1; });
+    return Object.keys(m).map(function (k) { return { key: k, n: m[k] }; }).sort(function (a, b) { return b.n - a.n || a.key.localeCompare(b.key); });
+  }
+  function renderSources(v) {
+    var body = $('src-body');
+    body.replaceChildren();
+    if (!v.docs.length) { body.append(H('p', { class: 'empty', text: 'No scans yet. Counts by scanner and person appear after the first batch is filed.' })); return; }
+    var bySc = countBy(v.docs, function (d) { return srcOf(d).scanner; }).map(function (r) {
+      var model = r.key ? scannerName(r.key) : 'Scanner not recorded';
+      return { n: r.n, label: model };
+    });
+    var byUser = countBy(v.docs, function (d) { return srcOf(d).user; }).map(function (r) {
+      return { n: r.n, label: r.key ? userName(r.key) : 'Not recorded' };
+    });
+    body.append(H('div', { class: 'src-grid' },
+      H('div', null, H('h3', { class: 'sub-h', text: 'By scanner' }), rankedBars(bySc, v.docs.length)),
+      H('div', null, H('h3', { class: 'sub-h', text: 'By person' }), rankedBars(byUser, v.docs.length))));
+  }
+
+  /* ---------- filings by month ---------- */
+  function niceStep(max) {
+    var steps = [1, 2, 5, 10, 20, 25, 50, 100, 200, 250, 500, 1000, 2000, 5000];
+    for (var i = 0; i < steps.length; i++) if (max / steps[i] <= 4) return steps[i];
+    return Math.pow(10, Math.ceil(Math.log10(max / 4)));
+  }
+  function monthSeries(docs) {
+    var dated = docs.map(function (d) { return { d: d, day: docDay(d) }; }).filter(function (x) { return x.day; });
+    if (!dated.length) return null;
+    var min = dated.reduce(function (a, x) { return x.day < a ? x.day : a; }, dated[0].day);
+    var max = dated.reduce(function (a, x) { return x.day > a ? x.day : a; }, dated[0].day);
+    var months = [];
+    var cur = new Date(min.getFullYear(), min.getMonth(), 1);
+    var end = new Date(max.getFullYear(), max.getMonth(), 1);
+    while (cur <= end) { months.push({ key: monthKey(cur), date: new Date(cur), by: {}, total: 0 }); cur.setMonth(cur.getMonth() + 1); }
+    if (months.length > 36) months = months.slice(-36);
+    var idx = {};
+    months.forEach(function (m, i) { idx[m.key] = i; });
+    dated.forEach(function (x) {
+      var i = idx[monthKey(x.day)];
+      if (i == null) return;
+      var t = typeOf(x.d.type).key;
+      months[i].by[t] = (months[i].by[t] || 0) + 1;
+      months[i].total++;
+    });
+    return months;
+  }
+  function typesPresent(docs) {
+    var seen = {};
+    docs.forEach(function (d) { seen[typeOf(d.type).key] = 1; });
+    return TYPES.filter(function (t) { return seen[t.key]; });
+  }
+  function legend(types) {
+    var ul = H('ul', { class: 'legend' });
+    types.forEach(function (t) { ul.append(H('li', null, H('span', { class: 'sw ' + t.cls }), t.many)); });
+    return ul;
+  }
+  function renderFilings(v) {
+    var body = $('fil-body'), note = $('fil-note'), btn = $('fil-tv');
+    body.replaceChildren();
+    var months = monthSeries(v.docs);
+    var undated = v.docs.filter(function (d) { return !docDay(d); }).length;
+    btn.hidden = !months;
+    if (!months) {
+      note.textContent = '';
+      body.append(H('p', { class: 'empty', text: v.docs.length ? 'None of these documents has a date, so there is nothing to plot.' : 'No dated documents yet. Monthly filings appear after the first batch is filed.' }));
+      return;
+    }
+    note.textContent = 'Documents per month by the date printed on them, split by type.' + (undated ? ' ' + plural(undated, 'undated document') + ' left out.' : '');
+    var types = typesPresent(v.docs.filter(docDay));
+    body.append(legend(types));
+    var chart = H('div', { class: 'chart' });
+    body.append(chart);
+    drawColumns(chart, months, types);
+    redraws.push(function () { drawColumns(chart, months, types); });
+    var tv = H('div', { class: 'tv tbl-wrap', hidden: btn.getAttribute('aria-expanded') !== 'true' });
+    var thead = H('tr', null, H('th', { text: 'Month' }), types.map(function (t) { return H('th', { class: 'r', text: t.many }); }), H('th', { class: 'r', text: 'Total' }));
+    var tbody = H('tbody');
+    months.forEach(function (m) {
+      tbody.append(H('tr', null, H('td', { text: MON[m.date.getMonth()] + ' ' + m.date.getFullYear() }),
+        types.map(function (t) { return H('td', { class: 'r', text: m.by[t.key] ? num(m.by[t.key]) : '' }); }),
+        H('td', { class: 'r', text: num(m.total) })));
+    });
+    tv.append(H('table', null, H('thead', null, thead), tbody));
+    body.append(tv);
+    toggleTable(btn, tv);
+  }
+  function toggleTable(btn, tv) {
+    btn.onclick = function () {
+      var open = btn.getAttribute('aria-expanded') !== 'true';
+      btn.setAttribute('aria-expanded', String(open));
+      btn.textContent = open ? 'Hide table' : 'Show as table';
+      tv.hidden = !open;
+    };
+    var open = btn.getAttribute('aria-expanded') === 'true';
+    btn.textContent = open ? 'Hide table' : 'Show as table';
+  }
+  function topRounded(x, y, w, h, r) {
+    r = Math.max(0, Math.min(r, w / 2, h));
+    return 'M' + x + ',' + (y + h) + 'V' + (y + r) + 'Q' + x + ',' + y + ' ' + (x + r) + ',' + y +
+      'H' + (x + w - r) + 'Q' + (x + w) + ',' + y + ' ' + (x + w) + ',' + (y + r) + 'V' + (y + h) + 'Z';
+  }
+  function drawColumns(host, months, types) {
+    host.replaceChildren();
+    var W = Math.max(280, host.clientWidth || 800);
+    var plotH = W < 520 ? 170 : 220;
+    var m = { l: 30, r: 4, t: 22, b: 42 };
+    var H0 = m.t + plotH + m.b;
+    var max = Math.max.apply(null, months.map(function (x) { return x.total; }).concat([1]));
+    var step = niceStep(max), yMax = Math.ceil(max / step) * step;
+    var band = (W - m.l - m.r) / months.length;
+    var colW = Math.max(3, Math.min(24, band * 0.62));
+    var GAP = 2;
+    var k = plotH / yMax;
+    var base = m.t + plotH;
+    var svg = S('svg', { width: W, height: H0, viewBox: '0 0 ' + W + ' ' + H0, role: 'group', 'aria-label': 'Documents filed per month' });
+
+    for (var v = 0; v <= yMax; v += step) {
+      var y = Math.round(base - v * k) + .5;
+      if (v > 0) svg.append(S('line', { x1: m.l, x2: W - m.r, y1: y, y2: y, class: 'gridline' }));
+      svg.append(S('text', { x: m.l - 8, y: y + 4, 'text-anchor': 'end', class: 'tick' }, num(v)));
+    }
+    var every = [1, 2, 3, 4, 6, 12].filter(function (e) { return band * e >= 34; })[0] || 12;
+    var peakIdx = months.reduce(function (bi, x, i) { return x.total > months[bi].total ? i : bi; }, 0);
+    var cols = [];
+    months.forEach(function (mo, i) {
+      var cx = m.l + band * i + band / 2;
+      var x = cx - colW / 2;
+      var g = S('g', { class: 'col' });
+      var segs = types.filter(function (t) { return mo.by[t.key]; });
+      var cursor = base;
+      segs.forEach(function (t, j) {
+        var h = mo.by[t.key] * k;
+        var top = j === segs.length - 1;
+        var drawH = Math.max(1, top ? h : h - GAP);
+        var yTop = cursor - h + (top ? 0 : GAP);
+        if (top) g.append(S('path', { d: topRounded(x, yTop, colW, drawH, 4), class: t.cls }));
+        else g.append(S('rect', { x: x, y: yTop, width: colW, height: drawH, class: t.cls }));
+        cursor -= h;
+      });
+      svg.append(g);
+      cols.push(g);
+      if (i === peakIdx && mo.total) {
+        svg.append(S('text', { x: cx, y: base - mo.total * k - 7, 'text-anchor': 'middle', class: 'peak' }, num(mo.total)));
+      }
+      var monthIdx = mo.date.getMonth();
+      if (i % every === 0) {
+        svg.append(S('text', { x: cx, y: base + 17, 'text-anchor': 'middle', class: 'tick' }, MON[monthIdx]));
+      }
+      if (i === 0 || monthIdx === 0) {
+        svg.append(S('text', { x: Math.max(cx, m.l + 12), y: base + 34, 'text-anchor': i === 0 ? 'start' : 'middle', class: 'tick yr', dx: i === 0 ? -Math.min(colW / 2, 8) : 0 }, String(mo.date.getFullYear())));
+      }
+      var label = MON[monthIdx] + ' ' + mo.date.getFullYear() + ': ' + plural(mo.total, 'document');
+      var hit = S('rect', { x: m.l + band * i, y: m.t, width: band, height: plotH, class: 'hit', tabindex: 0, role: 'img', 'aria-label': label });
+      bindTip(hit, function () {
+        var rows = [H('div', { class: 'tip-h', text: MON[monthIdx] + ' ' + mo.date.getFullYear() }), tipRow(null, num(mo.total), 'total')];
+        types.slice().reverse().forEach(function (t) { if (mo.by[t.key]) rows.push(tipRow(t.cls, num(mo.by[t.key]), t.many)); });
+        return rows;
+      }, function () { host.classList.add('hovering'); g.classList.add('hot'); },
+      function () { host.classList.remove('hovering'); g.classList.remove('hot'); });
+      svg.append(hit);
+    });
+    svg.append(S('line', { x1: m.l, x2: W - m.r, y1: base + .5, y2: base + .5, class: 'baseline' }));
+    host.append(svg);
+  }
+
+  /* ---------- where it's filed ---------- */
+  function renderWhere(v) {
+    var body = $('where-body'), note = $('where-note'), btn = $('where-tv');
+    body.replaceChildren();
+    if (!v.docs.length) {
+      btn.hidden = true;
+      note.textContent = '';
+      body.append(H('p', { class: 'empty', text: state.entity === 'all' ? 'No documents filed yet.' : 'No documents filed for ' + entName(state.entity) + ' yet.' }));
+      return;
+    }
+    btn.hidden = false;
+    var years = {};
+    v.docs.forEach(function (d) { if (isMoneyDoc(d) && amountOf(d) != null) { var y = d.year || (docDay(d) ? String(docDay(d).getFullYear()) : null); if (y) years[y] = 1; } });
+    var yearList = Object.keys(years).sort().slice(-3);
+    note.textContent = 'Document mix per entity, with receipt and invoice totals by year' + (yearList.length ? '' : ' (none recorded yet)') + '.';
+    var types = typesPresent(v.docs);
+    var ents = visibleEntities().filter(function (e) { return inScope(e.slug); });
+    var known = {};
+    ents.forEach(function (e) { known[e.slug] = 1; });
+    var orphan = v.docs.filter(function (d) { return !known[d.entity]; });
+    if (orphan.length && !LOCKED) ents = ents.concat([{ slug: '__none', name: 'Unassigned' }]);
+
+    var tbody = H('tbody');
+    ents.forEach(function (e) {
+      var docs = e.slug === '__none' ? orphan : v.docs.filter(function (d) { return d.entity === e.slug; });
+      var by = {};
+      docs.forEach(function (d) { var t = typeOf(d.type).key; by[t] = (by[t] || 0) + 1; });
+      var mix = H('div', { class: 'mix', role: 'img', 'aria-label': docs.length ? types.filter(function (t) { return by[t.key]; }).map(function (t) { return t.many + ' ' + by[t.key]; }).join(', ') : 'No documents' });
+      types.forEach(function (t) {
+        if (!by[t.key]) return;
+        var s = H('span', { class: t.cls });
+        s.style.width = 'calc((100% - ' + 2 * (Object.keys(by).length - 1) + 'px) * ' + (by[t.key] / docs.length).toFixed(4) + ')';
+        bindTip(s, function () { return [H('div', { class: 'tip-h', text: e.slug === '__none' ? 'Unassigned' : entName(e.slug) }), tipRow(t.cls, num(by[t.key]), t.many + ' (' + Math.round(by[t.key] / docs.length * 100) + '%)')]; });
+        mix.append(s);
+      });
+      var totals = yearList.map(function (y) {
+        var sum = 0, n = 0;
+        docs.forEach(function (d) {
+          var dy = d.year || (docDay(d) ? String(docDay(d).getFullYear()) : null);
+          if (isMoneyDoc(d) && dy === y && amountOf(d) != null) { sum += amountOf(d); n++; }
+        });
+        return H('td', { class: 'r', text: n ? usd0.format(sum) : '' });
+      });
+      var kind = ENT[e.slug] && ENT[e.slug].kind ? (ENT[e.slug].kind === 'business' ? 'Business' : ENT[e.slug].kind === 'personal' ? 'Personal' : tidy(ENT[e.slug].kind)) : '';
+      var label = e.slug === '__none' ? 'Unassigned' : entName(e.slug);
+      tbody.append(H('tr', null,
+        H('td', { class: 'ent-name' }, label, kind && kind !== label ? H('span', { class: 'ent-kind', text: kind }) : null,
+          docs.length ? mix : H('span', { class: 'ent-kind', text: 'nothing filed yet' })),
+        H('td', { class: 'r', text: num(docs.length) }),
+        totals));
+    });
+    var thead = H('tr', null, H('th', { text: 'Entity and document mix' }), H('th', { class: 'r', text: 'Docs' }),
+      yearList.map(function (y) { return H('th', { class: 'r', text: y }); }));
+    var left = H('div', null, legend(types), H('div', { class: 'tbl-wrap' }, H('table', { class: 'ent' }, H('thead', null, thead), tbody)),
+      yearList.length ? H('p', { class: 'sec-note', text: 'Year columns add up receipts and invoices with a readable total.' }) : null);
+
+    var byType = countBy(v.docs, function (d) { return typeOf(d.type).key; }).map(function (r) { return { n: r.n, label: TYPE[r.key].many, cls: TYPE[r.key].cls }; });
+    var right = H('div', null, H('h3', { class: 'sub-h', text: 'By type' }), rankedBars(byType, v.docs.length, function (r) { return r.cls; }));
+    body.append(H('div', { class: 'where' }, left, right));
+
+    var tv = H('div', { class: 'tv tbl-wrap', hidden: btn.getAttribute('aria-expanded') !== 'true' });
+    var tvHead = H('tr', null, H('th', { text: 'Entity' }), types.map(function (t) { return H('th', { class: 'r', text: t.many }); }), H('th', { class: 'r', text: 'Total' }));
+    var tvBody = H('tbody');
+    ents.forEach(function (e) {
+      var docs = e.slug === '__none' ? orphan : v.docs.filter(function (d) { return d.entity === e.slug; });
+      tvBody.append(H('tr', null, H('td', { text: e.slug === '__none' ? 'Unassigned' : entName(e.slug) }),
+        types.map(function (t) { var n = docs.filter(function (d) { return typeOf(d.type).key === t.key; }).length; return H('td', { class: 'r', text: n ? num(n) : '' }); }),
+        H('td', { class: 'r', text: num(docs.length) })));
+    });
+    tv.append(H('table', null, H('thead', null, tvHead), tvBody));
+    body.append(tv);
+    toggleTable(btn, tv);
+  }
+
+  /* ---------- paychecks ---------- */
+  function payStats(p) {
+    var checks = arr(p.checks).filter(isObj);
+    var nums = checks.map(function (c) { return +c.check_number; }).filter(function (n) { return isFinite(n); }).sort(function (a, b) { return a - b; });
+    var missing = [];
+    if (nums.length > 1 && nums[nums.length - 1] - nums[0] <= 400) {
+      var have = {};
+      nums.forEach(function (n) { have[n] = 1; });
+      for (var n = nums[0]; n <= nums[nums.length - 1]; n++) if (!have[n]) missing.push(n);
+    }
+    return {
+      checks: checks, nums: nums, missing: missing,
+      unsigned: checks.filter(function (c) { return c.signed === false; }),
+      total: checks.reduce(function (s, c) { return s + (typeof c.amount === 'number' ? c.amount : 0); }, 0)
+    };
+  }
+  function renderPay(v) {
+    var body = $('pay-body'), note = $('pay-note');
+    body.replaceChildren();
+    if (!v.pays.length) {
+      note.textContent = '';
+      body.append(H('p', { class: 'empty', text: state.entity === 'all' ? 'No pay runs filed. Scan one with scan-checks and it shows up here.' : 'No pay runs filed for ' + entName(state.entity) + '.' }));
+      return;
+    }
+    var pays = v.pays.slice().sort(function (a, b) { return String(b.paydate || '').localeCompare(String(a.paydate || '')); });
+    var stats = pays.map(payStats);
+    var nChecks = stats.reduce(function (s, x) { return s + x.checks.length; }, 0);
+    var sum = stats.reduce(function (s, x) { return s + x.total; }, 0);
+    note.textContent = plural(pays.length, 'pay run') + ', ' + plural(nChecks, 'check') + ', ' + usd.format(sum) + ' in total. Each block is one check number in sequence.';
+    body.append(H('ul', { class: 'strip-key' },
+      H('li', null, H('span', { class: 'slot' }), 'Signed check'),
+      H('li', null, H('span', { class: 'slot unsigned' }), 'Not signed'),
+      H('li', null, H('span', { class: 'slot missing' }), 'Number missing')));
+    var showEnt = state.entity === 'all';
+    var tbody = H('tbody');
+    pays.forEach(function (p, i) {
+      var st = stats[i], pd = parseDay(p.paydate);
+      var strip = H('div', { class: 'strip', role: 'img', 'aria-label': 'Checks ' + (st.nums[0] || '') + ' to ' + (st.nums[st.nums.length - 1] || '') + (st.missing.length ? ', missing ' + st.missing.join(', ') : '') + (st.unsigned.length ? ', not signed ' + st.unsigned.map(function (c) { return c.check_number; }).join(', ') : '') });
+      var byNum = {};
+      st.checks.forEach(function (c) { byNum[+c.check_number] = c; });
+      if (st.nums.length && st.nums[st.nums.length - 1] - st.nums[0] <= 400) {
+        for (var n = st.nums[0]; n <= st.nums[st.nums.length - 1]; n++) {
+          (function (n) {
+            var c = byNum[n];
+            var slot = H('span', { class: 'slot' + (!c ? ' missing' : c.signed === false ? ' unsigned' : '') });
+            bindTip(slot, function () {
+              if (!c) return [H('div', { class: 'tip-h', text: 'Check ' + n }), H('div', { class: 'tip-p', text: 'Not in this pay run' })];
+              return [H('div', { class: 'tip-h', text: 'Check ' + n }), H('div', { class: 'tip-p', text: (c.payee || 'Payee not read') }),
+                H('div', { class: 'tip-p num', text: money(c.amount) + (c.signed === false ? ', not signed' : '') })];
+            });
+            strip.append(slot);
+          })(n);
+        }
+      }
+      var flags = H('div', { class: 'flags' });
+      if (st.missing.length) flags.append(H('div', { class: 'flag' }, icon('missing'), 'Missing ' + (st.missing.length > 6 ? st.missing.length + ' numbers' : st.missing.join(', '))));
+      st.unsigned.forEach(function (c) { flags.append(H('div', { class: 'flag' }, icon('unsigned'), String(c.check_number) + ' not signed')); });
+      if (!st.missing.length && !st.unsigned.length) flags.append(H('div', { class: 'flag' }, icon('done'), 'Complete'));
+      var rep = fuEntries(p).filter(function (f) { return f.key === 'check_report'; })[0];
+      if (rep && rep.status !== 'done') flags.append(H('div', { class: 'flag' }, icon(rep.status), 'Report ' + (STATUS_LABEL[rep.status] || rep.status).toLowerCase()));
+      var list = H('ol');
+      st.checks.slice().sort(function (a, b) { return a.check_number - b.check_number; }).forEach(function (c) {
+        list.append(H('li', null, H('span', { class: 'num', text: String(c.check_number) }), H('span', { text: (c.payee || 'Payee not read') + (c.signed === false ? ' (not signed)' : '') }), H('span', { class: 'num', text: money(c.amount) })));
+      });
+      tbody.append(H('tr', null,
+        H('td', { class: 'c-pdate' }, fileLink(p.file, pd ? fmtDay(pd) : String(p.paydate || 'Undated'), 'doc-t'),
+          H('details', { class: 'checks' }, H('summary', { text: plural(st.checks.length, 'check') }), list)),
+        showEnt ? H('td', { class: 'c-pent', text: entName(p.entity) }) : null,
+        H('td', { class: 'r c-ptotal', text: usd.format(st.total) }),
+        H('td', { class: 'c-strip' }, strip),
+        H('td', { class: 'c-flags' }, flags)));
+    });
+    var thead = H('tr', null, H('th', { text: 'Pay date' }), showEnt ? H('th', { text: 'Entity' }) : null, H('th', { class: 'r', text: 'Total' }), H('th', { text: 'Check numbers' }), H('th', { text: 'Flags' }));
+    body.append(H('div', { class: 'tbl-wrap' }, H('table', { class: 'pay' }, H('thead', null, thead), tbody)));
+  }
+
+  /* ---------- documents table ---------- */
+  var hay = new WeakMap();
+  function haystack(d) {
+    if (hay.has(d)) return hay.get(d);
+    var f = fieldsOf(d), bits = [d.name, d.file, docTitle(d), entName(d.entity), typeOf(d.type).many, typeOf(d.type).one, money(amountOf(d))];
+    Object.keys(f).forEach(function (k) { var x = f[k]; if (typeof x === 'string' || typeof x === 'number') bits.push(String(x)); });
+    var s = bits.join(' ').toLowerCase();
+    hay.set(d, s);
+    return s;
+  }
+  function docYear(d) { return d.year || (docDay(d) ? String(docDay(d).getFullYear()) : ''); }
+  function renderDocs(v) {
+    var body = $('docs-body');
+    var active = document.activeElement && body.contains(document.activeElement) ? document.activeElement.id : null;
+    body.replaceChildren();
+    if (!v.docs.length) {
+      body.append(H('p', { class: 'empty', text: state.entity === 'all' ? 'No documents filed yet. Scan a stack with scan-batch, then file it with batch-file.' : 'No documents filed for ' + entName(state.entity) + ' yet.' }));
+      return;
+    }
+    function opts(id, label, list, value) {
+      var s = H('select', { id: id, 'aria-label': label, class: value ? 'set' : null });
+      s.append(H('option', { value: '', text: label }));
+      list.forEach(function (o) { var op = H('option', { value: o.v, text: o.t }); if (o.v === value) op.selected = true; s.append(op); });
+      return s;
+    }
+    var typeList = typesPresent(v.docs).map(function (t) { return { v: t.key, t: t.many }; });
+    var yearSet = {};
+    v.docs.forEach(function (d) { yearSet[docYear(d) || 'none'] = 1; });
+    var yearList = Object.keys(yearSet).filter(function (y) { return y !== 'none'; }).sort().reverse().map(function (y) { return { v: y, t: y }; });
+    if (yearSet.none) yearList.push({ v: 'none', t: 'Undated' });
+    var scList = countBy(v.docs, function (d) { return srcOf(d).scanner; }).filter(function (r) { return r.key; }).map(function (r) { return { v: r.key, t: scannerName(r.key) }; });
+    var usList = countBy(v.docs, function (d) { return srcOf(d).user; }).filter(function (r) { return r.key; }).map(function (r) { return { v: r.key, t: userName(r.key) }; });
+    ['type', 'year', 'scanner', 'user'].forEach(function (k) {
+      var list = { type: typeList, year: yearList, scanner: scList, user: usList }[k];
+      if (state[k] && !list.some(function (o) { return o.v === state[k]; })) state[k] = '';
+    });
+
+    var search = H('input', { type: 'search', id: 'f-q', placeholder: 'Search names, vendors, amounts', 'aria-label': 'Search documents', value: state.q, class: state.q ? 'set' : null });
+    var filters = H('div', { class: 'filters', role: 'search' }, search);
+    if (!LOCKED) {
+      var entSel = opts('f-entity', 'All entities', C.entities.map(function (e) { return { v: e.slug, t: entName(e.slug) }; }), state.entity === 'all' ? '' : state.entity);
+      entSel.addEventListener('change', function () { setEntity(entSel.value || 'all'); });
+      filters.append(entSel);
+    }
+    var selType = opts('f-type', 'All types', typeList, state.type);
+    var selYear = opts('f-year', 'All years', yearList, state.year);
+    var selSc = opts('f-scanner', 'All scanners', scList, state.scanner);
+    var selUs = opts('f-user', 'Everyone', usList, state.user);
+    filters.append(selType, selYear, selSc, selUs);
+    var clear = H('button', { class: 'btn', type: 'button', id: 'f-clear', text: 'Clear filters' });
+    filters.append(clear);
+    body.append(filters);
+
+    var count = H('p', { class: 'count', 'aria-live': 'polite' });
+    body.append(count);
+    var table = H('table', { class: 'docs' + (state.entity === 'all' ? '' : ' one-entity') });
+    function sortHead(key, label, cls) {
+      var th = H('th', { class: cls });
+      if (state.sortKey === key) th.setAttribute('aria-sort', state.sortDir < 0 ? 'descending' : 'ascending');
+      var b = H('button', { type: 'button', text: label, id: 'sort-' + key });
+      b.addEventListener('click', function () {
+        if (state.sortKey === key) state.sortDir = -state.sortDir; else { state.sortKey = key; state.sortDir = -1; }
+        renderDocs(view());
+      });
+      th.append(b);
+      return th;
+    }
+    table.append(H('thead', null, H('tr', null,
+      sortHead('date', 'Date', 'c-date'), H('th', { class: 'c-doc', text: 'Document' }), H('th', { class: 'c-type', text: 'Type' }),
+      H('th', { class: 'c-ent', text: 'Entity' }), sortHead('amount', 'Amount', 'r c-amt'), sortHead('pages', 'Pages', 'r c-pages'),
+      H('th', { class: 'c-src', text: 'Scanned by' }), H('th', { class: 'c-fu', text: 'Follow-ups' }))));
+    var tbody = H('tbody');
+    table.append(tbody);
+    body.append(table);
+    var more = H('button', { class: 'btn more', type: 'button', id: 'f-more' });
+    body.append(more);
+
+    function matches() {
+      var q = state.q.trim().toLowerCase().split(/\s+/).filter(Boolean);
+      return v.docs.filter(function (d) {
+        if (state.type && typeOf(d.type).key !== state.type) return false;
+        if (state.year && (docYear(d) || 'none') !== state.year) return false;
+        if (state.scanner && srcOf(d).scanner !== state.scanner) return false;
+        if (state.user && srcOf(d).user !== state.user) return false;
+        if (q.length) { var h = haystack(d); for (var i = 0; i < q.length; i++) if (h.indexOf(q[i]) < 0) return false; }
+        return true;
+      }).sort(function (a, b) {
+        var k = state.sortKey, av, bv;
+        if (k === 'date') { av = docDay(a); bv = docDay(b); av = av ? +av : null; bv = bv ? +bv : null; }
+        else if (k === 'amount') { av = amountOf(a); bv = amountOf(b); }
+        else { av = pagesOf(a); bv = pagesOf(b); }
+        if (av == null && bv == null) return 0;
+        if (av == null) return 1;
+        if (bv == null) return -1;
+        return (av - bv) * state.sortDir || String(a.name).localeCompare(String(b.name));
+      });
+    }
+    function fill() {
+      var list = matches();
+      tbody.replaceChildren();
+      var filtered = state.q || state.type || state.year || state.scanner || state.user;
+      clear.hidden = !filtered;
+      count.textContent = list.length === v.docs.length ? 'Showing ' + Math.min(state.shown, list.length) + ' of ' + plural(v.docs.length, 'document') : plural(list.length, 'document') + ' match' + (list.length === 1 ? 'es' : '') + (list.length > state.shown ? ', showing ' + state.shown : '');
+      if (!list.length) {
+        tbody.append(H('tr', null, H('td', { colspan: 8, class: 'empty-row' }, 'No documents match. ', H('button', { class: 'btn', type: 'button', text: 'Clear filters', onclick: function () { clear.click(); } }))));
+      }
+      list.slice(0, state.shown).forEach(function (d) { tbody.append(docRow(d)); });
+      more.hidden = list.length <= state.shown;
+      more.textContent = 'Show ' + Math.min(40, list.length - state.shown) + ' more';
+    }
+    function bindSel(sel, key) {
+      sel.addEventListener('change', function () { state[key] = sel.value; state.shown = 40; sel.classList.toggle('set', !!sel.value); fill(); });
+    }
+    bindSel(selType, 'type'); bindSel(selYear, 'year'); bindSel(selSc, 'scanner'); bindSel(selUs, 'user');
+    search.addEventListener('input', function () { state.q = search.value; state.shown = 40; search.classList.toggle('set', !!search.value); fill(); });
+    clear.addEventListener('click', function () {
+      state.q = state.type = state.year = state.scanner = state.user = '';
+      state.shown = 40;
+      renderDocs(view());
+      var s = $('f-q'); if (s) s.focus();
+    });
+    more.addEventListener('click', function () { state.shown += 40; fill(); });
+    fill();
+    if (active && $(active)) $(active).focus();
+  }
+  function docRow(d) {
+    var t = typeOf(d.type), dd = docDay(d), s = srcOf(d), amt = amountOf(d), pages = pagesOf(d);
+    var fus = H('div', { class: 'fus' });
+    fuEntries(d).forEach(function (f) {
+      var w = wfOf(f.key);
+      fus.append(H('span', { class: 'fu', title: w.title + ': ' + (STATUS_LABEL[f.status] || f.status) + (f.note ? ' (' + f.note + ')' : '') },
+        icon(f.status, STATUS_LABEL[f.status] || f.status), w.short));
+    });
+    return H('tr', null,
+      H('td', { class: 'c-date num', text: dd ? fmtDay(dd) : 'Undated' }),
+      H('td', { class: 'c-doc' },
+        fileLink(d.file, docTitle(d), 'doc-t'),
+        d.confidence === 'low' ? H('span', { class: 'lowc', title: 'The reader was unsure about this one', text: 'low confidence' }) : null,
+        H('span', { class: 'doc-f', text: d.name || baseName(d.file) })),
+      H('td', { class: 'c-type' }, H('span', { class: 'typ' }, H('span', { class: 'sw ' + t.cls }), t.one)),
+      H('td', { class: 'c-ent', text: entName(d.entity) }),
+      H('td', { class: 'r c-amt', text: amt != null ? money(amt) : '' }),
+      H('td', { class: 'r c-pages' }, pages ? String(pages) : '', pages ? H('span', { class: 'ph', text: pages === 1 ? ' page' : ' pages' }) : null),
+      H('td', { class: 'c-src' }, H('span', { class: 'src-u', text: s.user ? userName(s.user) : '' }), s.scanner ? H('span', { class: 'src-m', text: scannerShort(s.scanner) }) : null),
+      H('td', { class: 'c-fu' }, fus));
+  }
+
+  /* ---------- theme toggle ---------- */
+  var THEMES = ['auto', 'light', 'dark'];
+  var theme = 'auto';
+  try { theme = localStorage.getItem('scan-dashboard-theme') || 'auto'; } catch (e) { /* storage blocked */ }
+  if (THEMES.indexOf(theme) < 0) theme = 'auto';
+  function applyTheme() {
+    if (theme === 'auto') document.documentElement.removeAttribute('data-theme');
+    else document.documentElement.setAttribute('data-theme', theme);
+    $('theme').textContent = 'Theme: ' + theme;
+  }
+  $('theme').addEventListener('click', function () {
+    theme = THEMES[(THEMES.indexOf(theme) + 1) % THEMES.length];
+    try { localStorage.setItem('scan-dashboard-theme', theme); } catch (e) { /* storage blocked */ }
+    applyTheme();
+  });
+  applyTheme();
+
+  /* ---------- render ---------- */
+  var redraws = [];
+  function renderAll() {
+    redraws = [];
+    hideTip();
+    var v = view();
+    renderTabs();
+    renderNeeds(v);
+    renderKpis(v);
+    renderDue(v);
+    renderSources(v);
+    renderFilings(v);
+    renderWhere(v);
+    renderPay(v);
+    renderDocs(v);
+    var f = $('foot');
+    var nScans = C.documents.length + C.paychecks.length + C.review.length;
+    f.textContent = (nScans ? 'Built from ' + plural(nScans, 'filed scan') + '. ' : '') +
+      'Nothing on this page loads from the network. Links open the PDFs that sit next to this file.';
+  }
+  renderMeta();
+  renderAll();
+
+  var lastW = $('folder').clientWidth, raf = 0;
+  function onResize() {
+    var w = $('folder').clientWidth;
+    if (w === lastW) return;
+    lastW = w;
+    cancelAnimationFrame(raf);
+    raf = requestAnimationFrame(function () { redraws.forEach(function (fn) { fn(); }); });
+  }
+  if (window.ResizeObserver) new ResizeObserver(onResize).observe($('folder'));
+  else window.addEventListener('resize', onResize);
+})();
+</script>
+</body>
+</html>
