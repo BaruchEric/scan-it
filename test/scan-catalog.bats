@@ -59,11 +59,13 @@ teardown() { rm -rf "$TMP"; }
   [ "$(jq -r '.users[0].name' <<<"$output")" = "Eric" ]
 }
 
-@test "build --entity keeps only that entity and links one folder up" {
+@test "build --entity keeps only that entity, with paths relative to its folder" {
   run "$CAT" -r "$ROOT" build --entity rio-laundromat
   [ "$status" -eq 0 ]
   [ "$(jq -c '[.documents[].entity] | unique' <<<"$output")" = '["rio-laundromat"]' ]
-  [ "$(jq -r '.link_prefix' <<<"$output")" = "../" ]
+  [ "$(jq -r '.link_prefix' <<<"$output")" = "" ]
+  [ "$(jq -r '.documents[0].file' <<<"$output")" = "receipts/2026/receipt-2026-06-08-home-depot \$45.23.pdf" ]
+  [ "$(jq -r '.paychecks[0].file' <<<"$output")" = "paychecks/2026/checks20260605.pdf" ]
   [ "$(jq '.review | length' <<<"$output")" = "0" ]
   [ "$(jq -c '[.entities[].slug]' <<<"$output")" = '["rio-laundromat"]' ]
 }
@@ -102,7 +104,7 @@ teardown() { rm -rf "$TMP"; }
 /*__CATALOG__*/
 </script></html>
 HTML
-  echo '{ "type": "letter", "name": "letter-x", "entity": "personal", "fields": { "note": "</script><b>" } }' \
+  echo '{ "type": "letter", "name": "letter-x", "entity": "personal", "fields": { "note": "<!--<script> </script><b>" } }' \
     > "$ROOT/personal/medical/letter-x.json"
   run env SCAN_DASHBOARD_TEMPLATE="$TMP/tpl.html" "$CAT" -r "$ROOT" dashboard
   [ "$status" -eq 0 ]
@@ -110,8 +112,12 @@ HTML
   [ -f "$ROOT/rio-laundromat/dashboard.html" ]
   [ -f "$ROOT/personal/dashboard.html" ]
   ! grep -q '__CATALOG__' "$ROOT/dashboard.html"
-  # A field holding </script> must not end the data block early.
+  # OCR text like "<!--<script>" or "</script>" must not break the data
+  # block: every "<" inside it is escaped, and the JSON still parses.
   [ "$(grep -c '</script>' "$ROOT/dashboard.html")" = "1" ]
+  sed -n '/<script id="catalog"/,/<\/script>/p' "$ROOT/dashboard.html" | sed '1d;$d' > "$TMP/data.json"
+  ! grep -q '<' "$TMP/data.json"
+  [ "$(jq -r '.documents[] | select(.name == "letter-x") | .fields.note' "$TMP/data.json")" = "<!--<script> </script><b>" ]
   sed -n '/<script id="catalog"/,/<\/script>/p' "$ROOT/rio-laundromat/dashboard.html" | sed '1d;$d' \
     | jq -e '.scope == "rio-laundromat"' >/dev/null
 }

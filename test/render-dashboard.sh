@@ -7,7 +7,9 @@
 #
 #   -o, --out FILE     output path (default: $TMPDIR/scan-dashboard/dashboard.html)
 #   --entity SLUG      per-entity copy: keep only SLUG's documents, paychecks and
-#                      review items, set scope to SLUG and link_prefix to "../"
+#                      documents and paychecks, set scope to SLUG, make file paths
+#                      relative to the entity folder, drop review items (the
+#                      same shape scan-catalog build --entity produces)
 #   --empty            empty catalog: every array emptied, as on a brand-new root
 #   --catalog FILE     catalog JSON to render (default: test/fixtures/catalog.sample.json)
 set -euo pipefail
@@ -47,17 +49,17 @@ elif [ -n "$entity" ]; then
   jq --arg e "$entity" '
     if any(.entities[]; .slug == $e) then . else error("no entity \($e) in catalog") end
     | .scope = $e
-    | .link_prefix = "../"
+    | .link_prefix = ""
     | .entities = [.entities[] | select(.slug == $e)]
-    | .documents = [.documents[] | select(.entity == $e)]
-    | .paychecks = [.paychecks[] | select(.entity == $e)]
-    | .review = [.review[] | select((.guess.entity // "") == $e)]
+    | .documents = [.documents[] | select(.entity == $e) | .file |= ltrimstr($e + "/")]
+    | .paychecks = [.paychecks[] | select(.entity == $e) | .file |= ltrimstr($e + "/")]
+    | .review = []
   ' "$catalog" > "$tmp/in.json"
 else
   cp "$catalog" "$tmp/in.json"
 fi
 
 mkdir -p "$(dirname "$out")"
-sed 's#</#<\\/#g' "$tmp/in.json" > "$tmp/c.json"
+sed 's#<#\\u003c#g' "$tmp/in.json" > "$tmp/c.json"
 awk -v f="$tmp/c.json" 'index($0,"/*__CATALOG__*/"){while((getline l < f)>0) print l; next} {print}' "$template" > "$out"
 echo "$out"
