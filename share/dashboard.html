@@ -1849,9 +1849,11 @@ details.checks li { display: grid; grid-template-columns: 4.5em minmax(0, 1fr) a
         var j = null;
         try { j = t ? JSON.parse(t) : null; } catch (e) { j = null; }
         if (!r.ok) {
-          if (j && typeof j.error === 'string' && j.error) throw new Error(j.error);
-          if (r.status === 401 || r.status === 403) throw new Error('The live server no longer accepts this page. Reload it to reconnect.');
-          throw new Error('The live server answered with status ' + r.status + '.');
+          var err = new Error(j && typeof j.error === 'string' && j.error ? j.error
+            : r.status === 401 || r.status === 403 ? 'The live server no longer accepts this page. Reload it to reconnect.'
+            : 'The live server answered with status ' + r.status + '.');
+          err.status = r.status;
+          throw err;
         }
         return j;
       });
@@ -1890,7 +1892,7 @@ details.checks li { display: grid; grid-template-columns: 4.5em minmax(0, 1fr) a
     if (btn) { btn.disabled = true; btn.setAttribute('aria-busy', 'true'); }
     if (errEl) errEl.hidden = true;
     api(path, 'POST', body).then(function (res) {
-      if (res && res.job) live.mine[res.job] = true;
+      if (res && res.job) live.mine[res.job] = Date.now();
       if (onOk) onOk(res);
     }, function (e) {
       if (errEl) showErr(errEl, e.message);
@@ -2160,6 +2162,7 @@ details.checks li { display: grid; grid-template-columns: 4.5em minmax(0, 1fr) a
     v.confirmBtn.disabled = live.frozen || !!live.busy['discard:' + v.id];
   }
 
+  function jobKey(j) { return j.id + '@' + (j.started || ''); }
   function jobTime(j) {
     var st = isoMs(j.started), en = isoMs(j.ended);
     if (j.state === 'running') return agoSpan('Running, started ', j.started);
@@ -2193,7 +2196,14 @@ details.checks li { display: grid; grid-template-columns: 4.5em minmax(0, 1fr) a
       v.loaded = true;
       if (atEnd) v.out.scrollTop = v.out.scrollHeight;
     }, function (e) {
-      v.out.textContent = e.message;
+      if (e.status !== 404) { v.out.textContent = e.message; return; }
+      /* Job ids restart at j1 with the server, so a 404 means this one is gone. */
+      delete live.mine[v.id];
+      v.open = false;
+      v.out.hidden = true;
+      v.out.textContent = '';
+      v.toggle.textContent = 'Output';
+      v.toggle.setAttribute('aria-expanded', 'false');
     }).then(function () { v.loading = false; });
   }
   function updateJob(v, j) {
@@ -2246,13 +2256,19 @@ details.checks li { display: grid; grid-template-columns: 4.5em minmax(0, 1fr) a
       if ((a.state === 'running') !== (b.state === 'running')) return a.state === 'running' ? -1 : 1;
       return (isoMs(b.started) || 0) - (isoMs(a.started) || 0);
     }).slice(0, 8);
-    syncList($('job-list'), live.views.jobs, jobs, function (j) { return j.id; }, createJob, updateJob);
+    /* Keyed by id and start time: a restarted server hands out j1, j2 again. */
+    syncList($('job-list'), live.views.jobs, jobs, jobKey, createJob, updateJob);
     $('jobs-none').hidden = jobs.length > 0;
 
+    var listed = {};
+    arr(st.jobs).forEach(function (j) { if (isObj(j)) listed[j.id] = true; });
+    Object.keys(live.mine).forEach(function (id) {
+      if (!listed[id] && Date.now() - live.mine[id] > 10000) delete live.mine[id];
+    });
     arr(st.jobs).forEach(function (j) {
       if (!isObj(j)) return;
-      if (j.state === 'running') live.seenRunning[j.id] = true;
-      if (j.reload && j.state === 'done' && (live.seenRunning[j.id] || live.mine[j.id]) && !live.reloading) {
+      if (j.state === 'running') live.seenRunning[jobKey(j)] = true;
+      if (j.reload && j.state === 'done' && (live.seenRunning[jobKey(j)] || live.mine[j.id]) && !live.reloading) {
         live.reloading = true;
         toast(j.kind === 'file' ? 'Filed. Reloading…' : 'Catalog rebuilt. Reloading…');
         setTimeout(function () { location.reload(); }, 1500);
