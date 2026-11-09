@@ -176,3 +176,41 @@ post() { # <path> [json]
   [ "$status" -eq 0 ]
   [[ "$output" == *"already running"* ]]
 }
+
+@test "File runs batch-file, and its .filing lock blocks a second filer" {
+  b=batch-20261101-100000
+  cat > "$STAGING/$b/manifest.json" <<JSON
+{ "batch": "$b", "documents": [],
+  "review": [ { "pages": [ { "file": "pages/page-001.jpg", "rotate": 0 } ],
+                "reason": "total unreadable", "guess": { "type": "receipt", "entity": "personal" } } ] }
+JSON
+  run post "/api/batches/$b/file"
+  [ "${lines[1]}" = "200" ]
+  job=$(jq -r .job <<<"${lines[0]}")
+  for _ in $(seq 1 150); do
+    st=$(curl -fs "$URL/api/jobs/$job" | jq -r .state)
+    [ "$st" != "running" ] && break
+    sleep 0.2
+  done
+  [ "$st" = "done" ]
+  [ -f "$ROOT/_review/review-$b-01.pdf" ]
+  run curl -fs "$URL/api/status"
+  [ "$(jq -r ".batches[] | select(.id == \"$b\") | .state" <<<"$output")" = "filed" ]
+  [ ! -e "$STAGING/$b/.filing" ]
+
+  # Someone else is filing batch-20261102: the dashboard offers nothing but
+  # Reveal, and a second batch-file refuses without touching the lock.
+  r=batch-20261102-100000
+  echo '{"batch":"'"$r"'","documents":[],"review":[{"pages":[{"file":"pages/page-001.jpg","rotate":0}],"reason":"x"}]}' \
+    > "$STAGING/$r/manifest.json"
+  mkdir "$STAGING/$r/.filing"
+  run curl -fs "$URL/api/status"
+  [ "$(jq -c ".batches[] | select(.id == \"$r\") | .actions" <<<"$output")" = '["reveal"]' ]
+  run post "/api/batches/$r/file"
+  [ "${lines[1]}" = "409" ]
+  run env SCAN_DASHBOARD_TEMPLATE="$TMP/tpl.html" "$BATS_TEST_DIRNAME/../bin/batch-file" -o "$ROOT" --no-dashboard "$STAGING/$r"
+  [ "$status" -eq 3 ]
+  [[ "$output" == *"already being filed"* ]]
+  [ -d "$STAGING/$r/.filing" ]
+  [ ! -e "$ROOT/_review/review-$r-01.pdf" ]
+}

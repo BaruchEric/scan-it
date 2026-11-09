@@ -39,6 +39,7 @@ Options:
 
 Exit codes:
   0 success   1 validation failure (nothing written)   2 assembly failure
+  3 another batch-file is already filing this staging dir (nothing written)
 EOF
 }
 
@@ -180,6 +181,13 @@ jq -e '[.documents[] | select(.type == "paycheck")]
 
 # ---------- assembly ----------
 
+# One filer per batch. The live dashboard's File button and a terminal run
+# can overlap; a second run would file every document twice. mkdir is atomic.
+if ! mkdir "$staging/.filing" 2>/dev/null; then
+  echo "batch-file: $staging is already being filed (remove $staging/.filing if no batch-file is running)" >&2
+  exit 3
+fi
+
 batch_id=$(jq -r '.batch' "$manifest")
 batch_meta() { jq -r "$1 // empty" "$staging/batch.json" 2>/dev/null || true; }
 resolution=$(batch_meta .resolution); resolution="${resolution:-300}"
@@ -195,7 +203,8 @@ safe_name() { printf '%s' "$1" | tr -c 'A-Za-z0-9._-' '-'; }
 index_file="$outdir/_index/$(safe_name "$scan_user")@$(safe_name "$filing_host").jsonl"
 
 workdir=$(mktemp -d -t batch-file)
-trap 'rm -rf "$workdir"' EXIT
+# The staging dir may be gone by exit (full success removes it).
+trap 'rm -rf "$workdir"; rmdir "$staging/.filing" 2>/dev/null || true' EXIT
 
 now() { date +%Y-%m-%dT%H:%M:%S%z; }
 

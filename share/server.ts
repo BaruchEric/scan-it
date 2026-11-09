@@ -332,7 +332,8 @@ function overlayBusy(list: Scanner[], batches: Batch[]): Scanner[] {
       detail: b.state === "stopping"
         ? `Stopping batch ${b.id} after the current stack (${pages}).`
         : `Scanning batch ${b.id} for ${b.user ?? "someone"} (${pages}).`,
-      actions: ["diag"],
+      // scan-diag probes the device too; mid-batch that fights scan-batch.
+      actions: [],
     };
   });
 }
@@ -447,7 +448,10 @@ class RealBackend implements Backend {
       ? existsSync(join(dir, ".stop")) ? "stopping" : "scanning"
       : existsSync(join(dir, ".filed")) ? "filed" : manifest ? "ready" : "staged";
     const job = jobs.find((j) => j.batch === id) ?? null;
-    const busy = job !== null && job.state === "running" && (job.kind === "file" || job.kind === "resume") && !alive;
+    // .filing is batch-file's lock: a filing run from this server, an earlier
+    // server, or a terminal. No other action may touch the batch meanwhile.
+    const busy = existsSync(join(dir, ".filing")) ||
+      (job !== null && job.state === "running" && (job.kind === "file" || job.kind === "resume") && !alive);
     const duplex = meta.source !== "ADF Front";
     const mine = job ? this.jobList.find((j) => j.id === job.id) : undefined;
     return {
@@ -1107,7 +1111,11 @@ async function handle(req: Request): Promise<Response> {
   m = /^\/api\/(diag|brother\/restart|dashboard\/refresh|reveal)$/.exec(path);
   if (m) {
     switch (m[1]) {
-      case "diag": return json({ job: backend.diag().id });
+      case "diag": {
+        const scanning = backend.batches().find((x) => x.state === "scanning" || x.state === "stopping");
+        if (scanning) throw new HttpError(409, `${scanning.id} is scanning. Run Diagnose after it ends.`);
+        return json({ job: backend.diag().id });
+      }
       case "brother/restart": {
         const busy = backend.batches().find((x) => x.scanner === "brother" && (x.state === "scanning" || x.state === "stopping"));
         if (busy) throw new HttpError(409, `The Brother is scanning ${busy.id}. Stop it first.`);
