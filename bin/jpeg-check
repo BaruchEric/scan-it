@@ -1,0 +1,180 @@
+#!/usr/bin/env bun
+// jpeg-check — integrity check for scanner JPEGs that carry restart markers.
+//
+// The Brother ADS-4300N writes one restart marker (RST0..RST7, cycling)
+// after every MCU row, and it declares the requested scan height in the
+// header even when the paper ends sooner: the stream simply stops, and
+// decoders paint the missing rows gray. Walking the markers tells three
+// cases apart without decoding a pixel:
+//
+//   ok         every MCU row is present
+//   truncated  the stream stops early but every row it has is in order;
+//              --repair crops it losslessly (jpegtran) to the rows present
+//   damaged    the marker sequence skips: rows went missing mid-page, so the
+//              picture is shifted and patched. Nothing fixes that but a rescan
+//   unknown    no restart markers, or not one row per interval (SANE output,
+//              progressive files); left alone
+//
+// Part of the scan-it project (~/dev/office/scan-it).
+
+import { readFileSync, renameSync, rmSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+
+type Verdict =
+  | { status: "ok"; height: number }
+  | { status: "truncated"; width: number; height: number; dataHeight: number }
+  | { status: "damaged"; height: number; gaps: number }
+  | { status: "unknown"; reason: string };
+
+type Frame = { width: number; height: number; mcuW: number; mcuH: number };
+
+function parse(buf: Buffer): Verdict {
+  if (buf.length < 4 || buf[0] !== 0xff || buf[1] !== 0xd8) {
+    return { status: "unknown", reason: "not a JPEG" };
+  }
+  let i = 2;
+  let dri = 0;
+  let frame: Frame | null = null;
+  let scanStart = -1;
+  while (i + 4 <= buf.length) {
+    if (buf[i] !== 0xff) return { status: "unknown", reason: "bad marker layout" };
+    const m = buf[i + 1];
+    if (m === 0xff) { i += 1; continue; } // fill byte
+    const len = buf.readUInt16BE(i + 2);
+    if (m === 0xdd) dri = buf.readUInt16BE(i + 4);
+    if (m >= 0xc0 && m <= 0xcf && m !== 0xc4 && m !== 0xc8 && m !== 0xcc) {
+      if (m !== 0xc0 && m !== 0xc1) return { status: "unknown", reason: "not a baseline JPEG" };
+      const height = buf.readUInt16BE(i + 5);
+      const width = buf.readUInt16BE(i + 7);
+      const comps = buf[i + 9];
+      let hmax = 1, vmax = 1;
+      for (let k = 0; k < comps; k++) {
+        const s = buf[i + 11 + 3 * k];
+        hmax = Math.max(hmax, s >> 4);
+        vmax = Math.max(vmax, s & 0x0f);
+      }
+      if (height === 0) return { status: "unknown", reason: "height set by DNL" };
+      frame = { width, height, mcuW: 8 * hmax, mcuH: 8 * vmax };
+    }
+    if (m === 0xda) { scanStart = i + 2 + len; break; }
+    i += 2 + len;
+  }
+  if (!frame || scanStart < 0) return { status: "unknown", reason: "no frame or scan header" };
+  if (dri === 0) return { status: "unknown", reason: "no restart markers" };
+  const mcusPerRow = Math.ceil(frame.width / frame.mcuW);
+  if (dri % mcusPerRow !== 0) return { status: "unknown", reason: "restart interval is not whole MCU rows" };
+
+  // Walk the entropy-coded data for RSTn markers until EOI (or any other marker).
+  const seq: number[] = [];
+  let j = scanStart;
+  for (;;) {
+    j = buf.indexOf(0xff, j);
+    if (j < 0 || j + 1 >= buf.length) break;
+    const b = buf[j + 1];
+    if (b === 0x00 || b === 0xff) { j += 1; continue; } // stuffed byte or fill
+    if (b >= 0xd0 && b <= 0xd7) { seq.push(b - 0xd0); j += 2; continue; }
+    break; // EOI, or a second scan (multi-scan files are rejected above)
+  }
+
+  let gaps = seq.length > 0 && seq[0] !== 0 ? 1 : 0;
+  for (let k = 1; k < seq.length; k++) if (seq[k] !== (seq[k - 1] + 1) % 8) gaps++;
+  if (gaps > 0) return { status: "damaged", height: frame.height, gaps };
+
+  const rowsPerInterval = dri / mcusPerRow;
+  const intervals = Math.ceil(Math.ceil(frame.height / frame.mcuH) / rowsPerInterval);
+  if (seq.length >= intervals - 1) return { status: "ok", height: frame.height };
+  // The interval after the last marker may be incomplete, so count only the
+  // intervals a marker closed.
+  const dataHeight = seq.length * rowsPerInterval * frame.mcuH;
+  if (dataHeight === 0) return { status: "damaged", height: frame.height, gaps: 0 };
+  return { status: "truncated", width: frame.width, height: frame.height, dataHeight };
+}
+
+function check(path: string): Verdict {
+  return parse(readFileSync(path));
+}
+
+// Lossless crop to the rows the scanner delivered. -restart 1 keeps one
+// marker per MCU row, so a later check of the cropped file still reads ok.
+function repair(path: string, v: Extract<Verdict, { status: "truncated" }>): string | null {
+  const tmp = `${path}.crop`;
+  const r = spawnSync("jpegtran",
+    ["-crop", `${v.width}x${v.dataHeight}+0+0`, "-restart", "1", "-copy", "all", "-outfile", tmp, path],
+    { stdio: ["ignore", "ignore", "pipe"] });
+  // Exit 2 means libjpeg warned, which it always does about the short
+  // stream it is cropping away. The check of the output below is the real test.
+  if (r.error || (r.status !== 0 && r.status !== 2)) {
+    rmSync(tmp, { force: true });
+    return r.error ? `jpegtran not runnable: ${r.error.message}` : `jpegtran exited ${r.status}`;
+  }
+  const after = check(tmp);
+  if (after.status !== "ok" || after.height !== v.dataHeight) {
+    rmSync(tmp, { force: true });
+    return `cropped file did not verify (${after.status})`;
+  }
+  renameSync(tmp, path);
+  return null;
+}
+
+function usage(code: number): never {
+  (code === 0 ? console.log : console.error)(
+`Usage: jpeg-check [--repair] FILE...
+
+Prints one line per file: ok, truncated, cropped, damaged, or unknown.
+  --repair   crop truncated files in place (lossless, jpegtran)
+
+Exit codes: 0 no damaged files   4 at least one damaged file
+            1 a file could not be read or repaired   64 usage`);
+  process.exit(code);
+}
+
+const args = process.argv.slice(2);
+let doRepair = false;
+const files: string[] = [];
+for (const a of args) {
+  if (a === "--repair") doRepair = true;
+  else if (a === "-h" || a === "--help") usage(0);
+  else if (a.startsWith("-")) usage(64);
+  else files.push(a);
+}
+if (files.length === 0) usage(64);
+
+let exit = 0;
+for (const f of files) {
+  let v: Verdict;
+  try {
+    v = check(f);
+  } catch (e) {
+    console.error(`jpeg-check: cannot read ${f}: ${(e as Error).message}`);
+    exit = Math.max(exit, 1);
+    continue;
+  }
+  switch (v.status) {
+    case "ok":
+      console.log(`ok ${f}`);
+      break;
+    case "unknown":
+      console.log(`unknown ${f} (${v.reason})`);
+      break;
+    case "damaged":
+      console.log(`damaged ${f} (restart markers skip ${v.gaps} time(s); rows missing mid-page)`);
+      exit = 4;
+      break;
+    case "truncated": {
+      if (!doRepair) {
+        console.log(`truncated ${f} (${v.dataHeight} of ${v.height} rows)`);
+        break;
+      }
+      const err = repair(f, v);
+      if (err) {
+        console.error(`jpeg-check: could not crop ${f}: ${err}`);
+        console.log(`truncated ${f} (${v.dataHeight} of ${v.height} rows)`);
+        if (exit === 0) exit = 1;
+      } else {
+        console.log(`cropped ${f} (${v.dataHeight} of ${v.height} rows)`);
+      }
+      break;
+    }
+  }
+}
+process.exit(exit);

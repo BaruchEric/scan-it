@@ -109,7 +109,8 @@ All live in `bin/` and are symlinked onto `PATH`.
 | `scan-catalog` | Read side of the filing tree. `build [--entity SLUG]` prints the merged catalog (no OCR text); `pending [WORKFLOW] [--json]` lists open follow-ups (`copy`, `quickbooks`, `calendar`, `vault`, `check_report`); `mark <file> <workflow> <status>` records an outcome in the sidecar; `dashboard [--open]` renders `share/dashboard.html` into the root and each entity folder; `serve [--port N] [--no-open] [--mock] [--public-url URL --allow-login LOGINS]` runs the live dashboard (see below). |
 | `scan-tunnel` | `scan-tunnel HOST [PORT]`: reverse SSH tunnel that puts the live dashboard on HOST's loopback for `tailscale serve` there. Frees a port a dead session still holds, then runs `ssh -N -R` in the foreground. `scan-catalog serve --install --tunnel HOST` runs it at login. |
 | `scan-organize` | Split an already-scanned PDF into per-document PDFs from a plan JSON (python3 stdlib); moves the source into `_originals/`. |
-| `escl-scan` | Direct eSCL client for the Brother ADS-4300N through the Push Scan Tool's localhost bridge. |
+| `escl-scan` | Direct eSCL client for the Brother ADS-4300N through the Push Scan Tool's localhost bridge. Runs `jpeg-check --repair` on each page as it lands and lists damaged pages in `<outdir>/.damaged` (`ESCL_SCAN_CHECK=0` turns that off). |
+| `jpeg-check` | `jpeg-check [--repair] FILE...` (bun). Reads a scanner JPEG's restart markers without decoding: `ok`; `truncated` (the paper ended before the requested height, which the Brother still declares; `--repair` crops it losslessly with jpegtran); `damaged` (the marker sequence skips, so rows are missing mid-page: rescan); `unknown` (no markers, left alone). Exit codes: `0` nothing damaged · `4` a damaged file · `1` unreadable or crop failed · `64` usage. |
 
 ### Paycheck workflow
 
@@ -195,7 +196,7 @@ bin/                        # the CLI tools (symlinked into ~/bin)
 share/dashboard.html        # dashboard template scan-catalog renders
 share/server.ts             # live dashboard server (scan-catalog serve)
 docs/                       # device-options.txt (full scanimage dump), superpowers/ plans & specs
-test/                       # bats suites + stubs/ (fake scanimage): scan-batch, batch-file, checks-normalize, scan-catalog, serve
+test/                       # bats suites + stubs/ (fake scanimage) + helpers/ (fake eSCL scanner, JPEG cutter): scan-batch, batch-file, checks-normalize, scan-catalog, serve, jpeg-check
 ENVIRONMENT.md              # machine + scanner baseline recorded at preflight
 PRD-ix500-mac-scanning.md   # original product requirements
 TROUBLESHOOTING.md          # failure modes and fixes

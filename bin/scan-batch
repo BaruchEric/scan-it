@@ -195,6 +195,14 @@ page_count() { find "$staging/pages" -name 'page-*.jpg' | wc -l | tr -d ' '; }
 # re-derive earlier chunk boundaries.
 chunk_counts=""   # space-separated page count per chunk this run
 
+# Pages escl-scan's integrity check found damaged mid-page (pages/.damaged),
+# as a JSON array of staging-relative paths.
+damaged_json() {
+  local f="$staging/pages/.damaged"
+  [[ -s "$f" ]] || { echo "[]"; return; }
+  jq -R -s -c 'split("\n") | map(select(length > 0) | "pages/" + .) | unique' "$f"
+}
+
 write_batch_json() {
   local arr="[]"
   [[ -z "$chunk_counts" ]] || arr="[${chunk_counts// /,}]"
@@ -203,10 +211,12 @@ write_batch_json() {
         --arg source "$source_opt" --arg mode "$mode" \
         --argjson resolution "$resolution" \
         --argjson pages "$(page_count)" --argjson chunks "$arr" \
+        --argjson damaged "$(damaged_json)" \
         --arg scanner "$scanner_slug" --arg device "$device" \
         --arg user "$scan_user" --arg host "$host" --arg entity "$default_entity" \
     '{batch: $id, started: $started, updated: $updated, source: $source,
       mode: $mode, resolution: $resolution, pages: $pages, chunks: $chunks,
+      damaged: $damaged,
       scanner: $scanner, device: $device, user: $user, host: $host,
       default_entity: (if $entity == "" then null else $entity end)}' \
     > "$staging/batch.json"
@@ -283,6 +293,11 @@ finish() {
   if [[ "$source_opt" == "ADF Duplex" ]] && (( total % 2 != 0 )); then
     echo "scan-batch: WARNING — odd page count ($total) from a duplex batch;" >&2
     echo "  a multifeed (two sheets stuck together) is likely. Verify the pages." >&2
+  fi
+  local damaged
+  damaged=$(jq -r 'join(" ")' <<<"$(damaged_json)")
+  if [[ -n "$damaged" ]]; then
+    echo "scan-batch: WARNING — damaged page(s), rescan those sheets: $damaged" >&2
   fi
   echo "Batch complete: $total page(s)."
   echo "$staging"

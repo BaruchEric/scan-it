@@ -190,6 +190,28 @@ case "$job" in
   *)  job="$endpoint/$job" ;;
 esac
 
+# Integrity check per page (bin/jpeg-check). The Brother declares the
+# requested height even when the paper ends sooner, so short pages are cropped
+# losslessly to the rows delivered. Pages that lost rows mid-page are kept
+# as-is and listed in <outdir>/.damaged for a rescan. Any trouble with the
+# checker itself leaves the page untouched: a scan never stops over it.
+# ESCL_SCAN_CHECK=0 turns it off.
+script_dir=$(cd "$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")" && pwd)
+checker="${ESCL_SCAN_CHECKER:-$script_dir/jpeg-check}"
+bun_bin=$(command -v bun 2>/dev/null || echo "$HOME/.bun/bin/bun")
+check_page() { # <file> <page-number>
+  [[ "${ESCL_SCAN_CHECK:-1}" != "0" && -x "$bun_bin" && -f "$checker" ]] || return 0
+  local out rc
+  out=$("$bun_bin" "$checker" --repair "$1" 2>&1) && rc=0 || rc=$?
+  case "$rc" in
+    0) [[ "$out" == cropped* ]] && echo "Page $2: paper ended early; cropped to the rows received." ;;
+    4) printf 'page-%03d.jpg\n' "$2" >> "$outdir/.damaged"
+       echo "escl-scan: WARNING — page $2 lost rows mid-page (damaged image); rescan that sheet." >&2 ;;
+    *) echo "escl-scan: page check failed, page $2 kept as received: ${out##*$'\n'}" >&2 ;;
+  esac
+  return 0
+}
+
 pages=0
 n=$start_num
 retries=0
@@ -198,6 +220,7 @@ while :; do
   code=$(curl -s -o "$part_file" -w '%{http_code}' --max-time 300 "$job/NextDocument" || echo 000)
   case "$code" in
     200)
+      check_page "$part_file" "$n"
       mv "$part_file" "$(printf '%s/page-%03d.jpg' "$outdir" "$n")"
       echo "Page $n received."
       n=$((n + 1)); pages=$((pages + 1)); retries=0 ;;
