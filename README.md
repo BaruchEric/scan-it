@@ -5,10 +5,11 @@ Open-source ScanSnap iX500 document-scanning stack for macOS: SANE-driven bash C
 ## TL;DR
 
 - **What:** Restores a full scan-to-PDF workflow for the Fujitsu ScanSnap iX500 on current macOS using only open-source software, over USB.
-- **How:** SANE's `scanimage` drives the scanner; eight bash tools in `bin/` handle acquisition, PDF assembly, check normalization, and manifest-driven filing.
+- **How:** SANE's `scanimage` drives the scanner; the CLI tools in `bin/` handle acquisition, PDF assembly, check normalization, and manifest-driven filing.
 - **Stack:** bash · SANE/sane-backends · img2pdf + qpdf · ImageMagick + poppler · jq · optional ocrmypdf · NAPS2 (GUI). No build step, no package manager.
 - **Install:** symlink `bin/*` onto your `PATH` (they already live in `~/bin` on this machine).
-- **Run it:** drop a stack in the ADF (open the lid to power on), then `scan2pdf taxes` → `~/Documents/Scans/taxes-YYYYMMDD-HHMMSS.pdf` (duplex, color, 300 dpi).
+- **Run it:** `scan-batch` scans a mixed stack into local staging; Claude classifies each sheet and writes a manifest; `batch-file` files every document into the Google Drive filing root `~/My Drive/scans/<entity>/<type>/[<YYYY>/]`.
+- **Read side:** `scan-catalog` merges the sidecars into a catalog, lists open follow-ups (Drive copies, QuickBooks drafts, calendar reminders, medical records), and renders the HTML dashboards.
 - **Diagnose:** `scan-diag` runs every dependency check and prints pass/fail with a fix hint per failure.
 
 ## Overview
@@ -25,7 +26,7 @@ A GUI path (NAPS2) is also documented for point-and-click scanning.
 
 ## Tech stack
 
-- **bash** — all eight tools, `set -euo pipefail`. No compiled code, no dependencies bundled.
+- **bash** — every tool except scan-organize (python3 stdlib), `set -euo pipefail`. No compiled code, no dependencies bundled.
 - **SANE / sane-backends** — `scanimage` (acquisition) and `sane-find-scanner` (probe); the `fujitsu` backend drives the iX500 over USB.
 - **img2pdf** — assemble page images into PDFs (the primary assembler).
 - **qpdf** — page-level PDF merge / split / append without re-encoding existing pages.
@@ -74,19 +75,23 @@ Green across the board means you're ready. See `TROUBLESHOOTING.md` for any fail
 ### 4. Scan
 
 ```sh
-scan2pdf taxes                        # → ~/Documents/Scans/taxes-YYYYMMDD-HHMMSS.pdf
+scan-batch                            # → ~/.cache/scan-it/batches/batch-<ts>/ (local staging)
+batch-file <staging-dir>              # → ~/My Drive/scans/<entity>/<type>/...
+scan2pdf taxes                        # raw one-off → ~/My Drive/scans/_inbox/taxes-<ts>.pdf
 ```
 
 ### Configuration
 
-- **Output root:** defaults to `~/Documents/Scans` (paychecks under `~/Documents/Scans/paychecks`); override per-command with `-o, --outdir DIR`.
+- **Filing root:** `SCAN_ROOT`, default `~/My Drive/scans` (Google Drive). Layout: `<entity>/<type-folder>/[<YYYY>/]<name>.pdf` plus a `.json` sidecar; year folders for receipts, invoices, statements, taxes (tax year) and paychecks. Also `_review/`, `_index/<user>@<host>.jsonl` (one append-only log per filer, so two machines never write one file), `_inbox/` (raw `scan2pdf` output), `_originals/` (`scan-organize` sources), and `dashboard.html` at the root and in each entity folder.
+- **Staging:** `SCAN_STAGING`, default `~/.cache/scan-it/batches`. Page JPEGs stay off Drive.
+- **Registries in the filing root:** `entities.json` (slug, legal name, kind, aliases, notes, `"quickbooks": true`, and `"copies": {"tax": "8328 De Soto Ave/Tax/{year}/Tax Supporting Docs"}` paths relative to the Drive root, `SCAN_DRIVE_ROOT`, default the filing root's parent) and `profiles.json` (users with login accounts, scanners, and per user+scanner profiles carrying a `default_entity`).
 - **Scan defaults:** duplex, color, 300 dpi; flip with `-s` (simplex), `-g` (gray), `-r N` (dpi).
 - **`scan-batch` env vars:** `SCAN_BATCH_SCANIMAGE` (path to `scanimage`), `SCAN_BATCH_POLL_SECS` (paper-sensor poll interval, default 2), plus `--idle N` (end batch after N idle seconds, default 60).
-- **Entities:** `~/Documents/Scans/entities.json` registers personal + per-business (LLC) slugs; a manifest document may carry `"entity": "<slug>"` so `batch-file` files it into a per-entity subfolder.
+- **Who and what:** `scan-batch --user <slug>` (or `SCAN_USER`, or an account match in `profiles.json`) and the detected scanner go into `batch.json` and from there into every sidecar.
 
 ## Scripts / commands
 
-All eight live in `bin/` and are symlinked onto `PATH`.
+All live in `bin/` and are symlinked onto `PATH`.
 
 | Tool | What it does |
 |------|--------------|
@@ -97,7 +102,10 @@ All eight live in `bin/` and are symlinked onto `PATH`.
 | `checks-report` | Per-paydate summary from a data file (`<check_number> <paydate> <amount> <signed>`): check counts, number sequences, missing numbers, period totals, unsigned checks, grand total. `-o FILE` also writes the report to a file. |
 | `scan-diag` | Diagnostics for the iX500 + SANE stack — colored pass/fail summary with a fix hint per failure. Read-only; safe to run any time. |
 | `scan-batch` | Continuously scan a heterogeneous stack in chunks (paper sensor auto-resumes between chunks; press Enter or wait for `--idle` seconds to end). Pages accumulate as per-page JPEGs in a timestamped staging dir. Exit codes: `0` success · `1` no scanner / device lost / jam · `2` no pages · `64` usage · `66` bad `--resume` dir · `130` interrupted. |
-| `batch-file` | Validate, classify, rotate, merge, rename, and file the staged pages produced by `scan-batch`, driven by `<staging>/manifest.json`. Writes nothing unless every scanned page is accounted for exactly once; emits JSON sidecars and appends the global index. `--no-text-layer`, `--keep-staging`, `-o DIR`. Exit codes: `0` success · `1` validation failure · `2` assembly failure · `64` usage · `66` not a staging dir. |
+| `batch-file` | Validate, rotate, merge, rename, and file the staged pages produced by `scan-batch`, driven by `<staging>/manifest.json`. Writes nothing unless every scanned page is accounted for exactly once and every document has an entity. Files entity first, writes sidecars (fields, OCR text, scanner/user provenance, follow-ups), runs the Drive copies `entities.json` maps, writes paydate check reports, appends the per-filer index, refreshes the dashboards. `--no-text-layer`, `--no-dashboard`, `--keep-staging`, `--drive-root DIR`, `-o DIR`. Exit codes: `0` success · `1` validation failure · `2` assembly failure · `64` usage · `66` not a staging dir. |
+| `scan-catalog` | Read side of the filing tree. `build [--entity SLUG]` prints the merged catalog (no OCR text); `pending [WORKFLOW] [--json]` lists open follow-ups (`copy`, `quickbooks`, `calendar`, `vault`, `check_report`); `mark <file> <workflow> <status>` records an outcome in the sidecar; `dashboard [--open]` renders `share/dashboard.html` into the root and each entity folder. |
+| `scan-organize` | Split an already-scanned PDF into per-document PDFs from a plan JSON (python3 stdlib); moves the source into `_originals/`. |
+| `escl-scan` | Direct eSCL client for the Brother ADS-4300N through the Push Scan Tool's localhost bridge. |
 
 ### Paycheck workflow
 
@@ -127,7 +135,7 @@ scan-batch                            # feed in chunks; auto-resumes; Enter / id
 batch-file <staging-dir>              # validates, files each document, refuses on any gap
 ```
 
-Output lands under `~/Documents/Scans/` in typed folders (`receipts/`, `invoices/`, `contracts/`, `statements/`, `letters/`, `taxes/`, `misc/`, `paychecks/`, `review/`), each PDF paired with a `.json` sidecar (OCR text, extracted fields, provenance). `entities.json` and `index.jsonl` track the entity registry and one line per filed document.
+Output lands under `~/My Drive/scans/<entity>/` in typed folders (`receipts/`, `invoices/`, `contracts/`, `statements/`, `letters/`, `medical/`, `taxes/`, `misc/`, `paychecks/`), year folders where the type has one, review items in `_review/`. Each PDF has a `.json` sidecar (OCR text, extracted fields, scanner/user provenance, follow-ups). Then `scan-catalog pending` lists the follow-ups and `scan-catalog dashboard` renders the dashboards.
 
 ### GUI: NAPS2
 
@@ -151,7 +159,8 @@ paper → scanimage (SANE) → page images → img2pdf/qpdf → PDF
 ### Repo layout
 
 ```
-bin/                        # the eight CLI tools (symlinked into ~/bin)
+bin/                        # the CLI tools (symlinked into ~/bin)
+share/dashboard.html        # dashboard template scan-catalog renders
 docs/                       # device-options.txt (full scanimage dump), superpowers/ plans & specs
 test/                       # bats suites + stubs/ (fake scanimage) — scan-batch, batch-file, checks-normalize
 ENVIRONMENT.md              # machine + scanner baseline recorded at preflight

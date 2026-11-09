@@ -3,13 +3,21 @@
 #
 # Reads <staging>/manifest.json (written by Claude during the batch workflow),
 # validates it completely, then rotates, merges, renames, and files every
-# document; writes JSON sidecars and appends the global index. Paycheck
-# documents route through checks-split, which normalizes each check.
+# document into the filing root laid out entity first:
 #
-# Part of the ix500-scan project (~/Arik/dev/office/scan-it).
+#   <root>/<entity>/<type-folder>/[<YYYY>/]<name>.pdf  (+ <name>.json sidecar)
+#
+# Receipts, invoices, statements, taxes, and paychecks get a year folder.
+# Sidecars record who scanned it on which scanner (from batch.json) and the
+# follow-up workflows the document needs. Entities that map a type to a Drive
+# folder in entities.json ("copies") also get a copy there (tax returns to the
+# property's Tax/<year> folder, medical records to MedicalRecords). Paychecks
+# route through checks-split, which normalizes each check.
+#
+# Part of the scan-it project (~/dev/office/scan-it).
 set -euo pipefail
 
-default_outdir="$HOME/Documents/Scans"
+default_outdir="${SCAN_ROOT:-$HOME/My Drive/scans}"
 
 usage() {
   cat <<EOF
@@ -20,10 +28,14 @@ unless the whole manifest validates (every scanned page accounted for exactly
 once across documents, dropped, and review).
 
 Options:
-  -o, --outdir DIR    filing root (default: $default_outdir)
-  --no-text-layer     skip the ocrmypdf searchable text layer
-  --keep-staging      keep the staging dir even on full success
-  -h, --help          show this help
+  -o, --outdir DIR      filing root (default: \$SCAN_ROOT or ~/My Drive/scans;
+                        now: $default_outdir)
+      --drive-root DIR  base for the "copies" paths in entities.json
+                        (default: \$SCAN_DRIVE_ROOT or the filing root's parent)
+  --no-text-layer       skip the ocrmypdf searchable text layer
+  --no-dashboard        do not refresh the dashboards after filing
+  --keep-staging        keep the staging dir even on full success
+  -h, --help            show this help
 
 Exit codes:
   0 success   1 validation failure (nothing written)   2 assembly failure
@@ -31,7 +43,9 @@ EOF
 }
 
 outdir="$default_outdir"
+drive_root="${SCAN_DRIVE_ROOT:-}"
 text_layer=1
+dashboard=1
 keep_staging=0
 staging=""
 
@@ -40,7 +54,11 @@ while [[ $# -gt 0 ]]; do
     -o|--outdir)
       [[ $# -ge 2 ]] || { echo "batch-file: $1 requires a value" >&2; exit 64; }
       outdir="$2"; shift ;;
+    --drive-root)
+      [[ $# -ge 2 ]] || { echo "batch-file: $1 requires a value" >&2; exit 64; }
+      drive_root="$2"; shift ;;
     --no-text-layer) text_layer=0 ;;
+    --no-dashboard) dashboard=0 ;;
     --keep-staging) keep_staging=1 ;;
     -h|--help) usage; exit 0 ;;
     -*) echo "batch-file: unknown option: $1" >&2; usage >&2; exit 64 ;;
@@ -53,6 +71,9 @@ done
 
 [[ -n "$staging" ]] || { usage >&2; exit 64; }
 staging="${staging%/}"
+outdir="${outdir%/}"
+[[ -n "$drive_root" ]] || drive_root=$(dirname "$outdir")
+drive_root="${drive_root%/}"
 [[ -d "$staging/pages" ]] || { echo "batch-file: not a batch staging dir: $staging" >&2; exit 66; }
 manifest="$staging/manifest.json"
 [[ -f "$manifest" ]] || { echo "batch-file: no manifest.json in $staging" >&2; exit 66; }
@@ -64,6 +85,16 @@ done
 fail() { echo "batch-file: $*" >&2; exit 1; }
 
 jq -e . "$manifest" >/dev/null 2>&1 || fail "manifest.json is not valid JSON"
+
+# Shared jq helpers: the year folder a document files under, and its date.
+# shellcheck disable=SC2016
+jq_defs='
+def yearly: IN("receipt","invoice","statement","tax");
+def iso: if type == "string" and test("^[0-9]{4}-[0-9]{2}-[0-9]{2}$") then . else null end;
+def doc_date: [.fields.date, .fields.date_of_service, .fields.drawn,
+               .fields.statement_date, .fields.period_end] | map(iso) | first(.[] | select(. != null)) // null;
+def doc_year: ((.year // .fields.tax_year // doc_date // "") | tostring | .[0:4]);
+'
 
 # ---------- validation: nothing is written past this section on failure ----------
 
@@ -110,22 +141,35 @@ jq -e '[.documents[] | select(.type | IN("receipt","invoice","statement"))]
   "$manifest" >/dev/null \
   || fail "receipt/invoice/statement names must end with the document total, like 'receipt-2026-06-08-home-depot \$45.23' (unreadable total -> route to review)"
 
-# Rule 3b: entity — optional per document; lowercase slug, and when a registry
-# exists at <outdir>/entities.json the slug must be listed in it.
-jq -e '[.documents[] | select(has("entity"))]
-       | all(.entity | type == "string" and test("^[a-z0-9][a-z0-9-]*$"))' \
-  "$manifest" >/dev/null || fail "bad entity (lowercase slug required)"
+# Rule 3b: entity — required on every document, because the tree is laid out
+# entity first. Lowercase slug; when a registry exists at <outdir>/entities.json
+# the slug must be listed in it.
+jq -e '.documents | all(has("entity") and (.entity | type == "string" and test("^[a-z0-9][a-z0-9-]*$")))' \
+  "$manifest" >/dev/null \
+  || fail "every document needs an entity (lowercase slug, e.g. \"personal\" or \"rio-laundromat\"; the scan profile's default is in batch.json; unsure -> route to review)"
 entities_file="$outdir/entities.json"
+has_registry=0
 if [[ -f "$entities_file" ]]; then
+  has_registry=1
   jq -e '.entities | type == "array" and length > 0 and all(.slug | type == "string")' \
     "$entities_file" >/dev/null 2>&1 \
     || fail "entities.json is invalid (expected {\"entities\": [{\"slug\": ...}]})"
+  jq -e '[.entities[] | (.copies // {}) | to_entries[] | .value]
+         | all(type == "string" and length > 0 and (startswith("/") | not)
+               and (test("(^|/)[.][.](/|$)") | not))' "$entities_file" >/dev/null 2>&1 \
+    || fail "entities.json: every \"copies\" path must be relative to the Drive root, without .."
   unknown=$(jq -r --slurpfile reg "$entities_file" '
     [$reg[0].entities[].slug] as $known
-    | [.documents[] | select(has("entity")) | .entity | select(IN($known[]) | not)]
+    | [.documents[] | .entity | select(IN($known[]) | not)]
     | unique | join(", ")' "$manifest")
   [[ -z "$unknown" ]] || fail "unknown entity: $unknown (not in $entities_file)"
 fi
+
+# Rule 3c: receipts, invoices, statements, and taxes file under a year folder,
+# so they need a year: "year", fields.tax_year, or an ISO fields.date.
+jq -e "$jq_defs"'[.documents[] | select(.type | yearly)]
+       | all(doc_year | test("^(19|20)[0-9]{2}$"))' "$manifest" >/dev/null \
+  || fail "receipts, invoices, statements, and taxes need fields.date as YYYY-MM-DD (or \"year\" / fields.tax_year) to pick their year folder"
 
 # Rules 4+5: paychecks carry check_number + YYYYMMDD paydate, exactly front+back.
 jq -e '[.documents[] | select(.type == "paycheck")]
@@ -137,11 +181,29 @@ jq -e '[.documents[] | select(.type == "paycheck")]
 # ---------- assembly ----------
 
 batch_id=$(jq -r '.batch' "$manifest")
-resolution=$(jq -r '.resolution // 300' "$staging/batch.json" 2>/dev/null || echo 300)
-scanned_at=$(jq -r '.started // ""' "$staging/batch.json" 2>/dev/null || echo "")
+batch_meta() { jq -r "$1 // empty" "$staging/batch.json" 2>/dev/null || true; }
+resolution=$(batch_meta .resolution); resolution="${resolution:-300}"
+scanned_at=$(batch_meta .started)
+scanner=$(batch_meta .scanner); scanner="${scanner:-unknown}"
+scan_user=$(batch_meta .user)
+[[ -n "$scan_user" ]] || scan_user="${SCAN_USER:-${USER:-unknown}}"
+scan_host=$(batch_meta .host)
+filing_host=$(hostname -s 2>/dev/null || echo unknown)
+[[ -n "$scan_host" ]] || scan_host="$filing_host"
+
+safe_name() { printf '%s' "$1" | tr -c 'A-Za-z0-9._-' '-'; }
+index_file="$outdir/_index/$(safe_name "$scan_user")@$(safe_name "$filing_host").jsonl"
 
 workdir=$(mktemp -d -t batch-file)
 trap 'rm -rf "$workdir"' EXIT
+
+now() { date +%Y-%m-%dT%H:%M:%S%z; }
+
+source_json=$(jq -n --arg batch "$batch_id" --arg scanned "$scanned_at" \
+  --arg scanner "$scanner" --arg user "$scan_user" --arg host "$scan_host" \
+  '{batch: $batch, scanned: $scanned, scanner: $scanner, user: $user, host: $host}')
+registry_json='{"entities":[]}'
+(( has_registry )) && registry_json=$(jq -c . "$entities_file")
 
 prep_page() { # <src> <rotate> -> echoes path of an upright JPEG
   local src="$1" rot="$2" dest
@@ -175,6 +237,7 @@ folder_for() {
     medical) echo medical ;;
     misc) echo misc ;;
     tax) echo taxes ;;
+    paycheck) echo paychecks ;;
   esac
 }
 
@@ -204,17 +267,39 @@ add_text_layer() { # <pdf> — embed a searchable text layer in place
   fi
 }
 
-now() { date +%Y-%m-%dT%H:%M:%S%z; }
+# Copy a filed PDF into the entity's Drive folder for its type, when
+# entities.json maps one ("copies": {"tax": "8328 De Soto Ave/Tax/{year}/..."}).
+# Echoes the copy's path relative to the Drive root; "!" + reason on failure;
+# nothing when the entity has no mapping for this type.
+copy_out() { # <pdf> <entity> <type> <year>
+  local pdf="$1" entity="$2" type="$3" year="$4" tpl dir target
+  tpl=$(jq -r --arg e "$entity" --arg t "$type" \
+    'first(.entities[] | select(.slug == $e)) | .copies[$t] // empty' <<<"$registry_json")
+  [[ -n "$tpl" ]] || return 0
+  if [[ "$tpl" == *"{year}"* && -z "$year" ]]; then
+    echo "!no year for {year} in $tpl"; return 0
+  fi
+  dir="$drive_root/${tpl//\{year\}/$year}"
+  if ! mkdir -p "$dir" 2>/dev/null; then echo "!cannot create $dir"; return 0; fi
+  target=$(unique_target "$dir" "$(basename "${pdf%.pdf}")")
+  if cp "$pdf" "$target" 2>/dev/null; then
+    echo "${target#"$drive_root"/}"
+  else
+    echo "!copy to $dir failed"
+  fi
+}
 
 filed_count=0
 
 file_document() { # <doc-json>
-  local doc="$1" type folder name entity dest pdf rel
+  local doc="$1" type folder name entity year dest pdf rel copied filed side
   type=$(jq -r '.type' <<<"$doc")
   folder=$(folder_for "$type")
-  entity=$(jq -r '.entity // ""' <<<"$doc")
-  dest="$folder${entity:+/$entity}"
+  entity=$(jq -r '.entity' <<<"$doc")
+  year=$(jq -r "$jq_defs"'doc_year' <<<"$doc")
   name=$(jq -r '.name' <<<"$doc")
+  dest="$entity/$folder"
+  if jq -e "$jq_defs"'.type | yearly' <<<"$doc" >/dev/null; then dest="$dest/$year"; fi
   mkdir -p "$outdir/$dest"
   pdf=$(unique_target "$outdir/$dest" "$name")
   if ! build_pdf "$doc" "$pdf"; then
@@ -223,83 +308,162 @@ file_document() { # <doc-json>
     return 1
   fi
   add_text_layer "$pdf"
-  jq -n --argjson doc "$doc" --arg batch "$batch_id" --arg scanned "$scanned_at" \
-    '{type: $doc.type, name: $doc.name, entity: ($doc.entity // null),
-      fields: ($doc.fields // {}),
-      text: ($doc.text // []), confidence: ($doc.confidence // "high"),
-      source: {batch: $batch, pages: [$doc.pages[].file], scanned: $scanned}}' \
-    > "${pdf%.pdf}.json"
+  copied=$(copy_out "$pdf" "$entity" "$type" "$year")
+  filed=$(now)
+  side="${pdf%.pdf}.json"
+  jq -n "$jq_defs"'
+    def pending: {status: "pending", note: null, updated: $filed, ref: null};
+    ($reg.entities | map(select(.slug == $doc.entity)) | first // {}) as $ent
+    | ($doc | doc_year) as $y
+    | {type: $doc.type, name: $doc.name, entity: $doc.entity,
+       date: ($doc | doc_date), year: (if $y == "" then null else $y end),
+       fields: ($doc.fields // {}),
+       text: ($doc.text // []), confidence: ($doc.confidence // "high"),
+       source: ($src + {pages: [$doc.pages[].file]}),
+       filed: $filed,
+       copies: (if $copied != "" and ($copied | startswith("!") | not) then [$copied] else [] end),
+       followups: (
+         (if $copied == "" then {}
+          elif ($copied | startswith("!")) then
+            {copy: {status: "failed", note: ($copied | ltrimstr("!")), updated: $filed, ref: null}}
+          else {copy: {status: "done", note: null, updated: $filed, ref: $copied}} end)
+         + (if ($doc.type | IN("receipt","invoice")) and ($ent.quickbooks // false)
+            then {quickbooks: pending} else {} end)
+         + (if ($doc.fields.due_date // null | iso) != null then {calendar: pending} else {} end)
+         + (if $doc.type == "medical" then {vault: pending} else {} end))}' \
+    --argjson doc "$doc" --argjson src "$source_json" --argjson reg "$registry_json" \
+    --arg filed "$filed" --arg copied "$copied" > "$side"
   rel="$dest/$(basename "$pdf")"
-  jq -nc --arg file "$rel" --argjson doc "$doc" --arg batch "$batch_id" --arg filed "$(now)" \
-    '{file: $file, type: $doc.type, entity: ($doc.entity // null),
-      fields: ($doc.fields // {}), batch: $batch, filed: $filed}' >> "$outdir/index.jsonl"
+  mkdir -p "$(dirname "$index_file")"
+  jq -c --arg file "$rel" '{file: $file, type, entity, date, year, fields,
+      batch: .source.batch, scanner: .source.scanner, user: .source.user,
+      host: .source.host, filed}' "$side" >> "$index_file"
   filed_count=$((filed_count + 1))
   echo "  $rel"
+  case "$copied" in
+    "") ;;
+    "!"*) echo "    copy FAILED: ${copied#!}" >&2 ;;
+    *) echo "    copied to $copied" ;;
+  esac
 }
 
 mkdir -p "$outdir"
-echo "Filing $batch_id into $outdir:"
+echo "Filing $batch_id into $outdir (scanned by $scan_user on $scanner):"
 while IFS= read -r doc; do
   file_document "$doc" || exit 2
 done < <(jq -c '.documents[] | select(.type != "paycheck")' "$manifest")
 
 # ---------- paychecks: reuse the existing checks pipeline ----------
 
+# Writes the per-paydate report next to the PDF when every check carries an
+# amount and signed y/n; echoes the report's file name, or nothing.
+paydate_report() { # <sidecar> <dir> <YYYYMMDD>
+  local side="$1" dir="$2" d="$3" data="$workdir/report-$3.txt"
+  command -v checks-report >/dev/null 2>&1 || return 0
+  jq -e '.checks | all((.amount | type == "number") and (.signed | type == "boolean"))' \
+    "$side" >/dev/null || return 0
+  jq -r --arg d "$d" '.checks[] | "\(.check_number) \($d) \(.amount) \(if .signed then "y" else "n" end)"' \
+    "$side" > "$data"
+  checks-report -o "$dir/checks$d-report.txt" "$data" >/dev/null 2>&1 || return 0
+  echo "checks$d-report.txt"
+}
+
 npay=$(jq '[.documents[] | select(.type == "paycheck")] | length' "$manifest")
 if (( npay > 0 )); then
   command -v checks-split >/dev/null 2>&1 \
     || { echo "batch-file: 'checks-split' not found" >&2; exit 1; }
-  # Build a temporary staging PDF of just the check pages (unrotated — the
-  # checks manifest carries the rotations) plus a checks-split manifest whose
-  # page numbers index into that PDF: front back number paydate frot brot.
-  cmanifest="$workdir/checks-manifest"
-  : > "$cmanifest"
-  imgs=()
-  p=0
-  while IFS= read -r doc; do
-    imgs+=("$staging/$(jq -r '.pages[0].file' <<<"$doc")")
-    imgs+=("$staging/$(jq -r '.pages[1].file' <<<"$doc")")
-    printf '%d %d %s %s %s %s\n' "$((p + 1))" "$((p + 2))" \
-      "$(jq -r '.fields.check_number' <<<"$doc")" \
-      "$(jq -r '.fields.paydate' <<<"$doc")" \
-      "$(jq -r '.pages[0].rotate' <<<"$doc")" \
-      "$(jq -r '.pages[1].rotate' <<<"$doc")" >> "$cmanifest"
-    p=$((p + 2))
-  done < <(jq -c '.documents[] | select(.type == "paycheck")' "$manifest")
-  if ! img2pdf --imgsize "${resolution}dpix${resolution}dpi" \
-       --output "$workdir/checks-staging.pdf" "${imgs[@]}"; then
-    echo "batch-file: assembly failed for paycheck staging PDF" >&2
-    exit 2
-  fi
-  # Split in the workdir (checks-split normalizes each check's pages itself),
-  # and only then file into $outdir: a failure files no paycheck pages, and
-  # appending pre-normalized pages means already-filed checks are never
-  # re-rendered (no JPEG generation loss).
-  if ! checks-split -o "$workdir/paychecks" "$workdir/checks-staging.pdf" "$cmanifest"; then
-    echo "batch-file: checks-split failed" >&2
-    echo "  no paycheck pages were filed; the non-paycheck documents above" >&2
-    echo "  already were, so re-running this manifest would duplicate them —" >&2
-    echo "  fix the problem and re-file only the paycheck documents" >&2
-    exit 2
-  fi
-  paydates=$(jq -r '.documents[] | select(.type == "paycheck") | .fields.paydate' "$manifest" \
-    | tr -d '-' | sort -u)  # checks-split strips dashes when naming checksYYYYMMDD.pdf
-  mkdir -p "$outdir/paychecks"
-  while IFS= read -r d; do
-    newpdf="$workdir/paychecks/checks$d.pdf"
-    target="$outdir/paychecks/checks$d.pdf"
-    if [[ -e "$target" ]]; then
-      if ! qpdf --empty --pages "$target" 1-z "$newpdf" 1-z -- "$workdir/merged-$d.pdf" \
-          || ! mv "$workdir/merged-$d.pdf" "$target"; then
-        echo "batch-file: failed to append to paychecks/checks$d.pdf" >&2
-        exit 2
-      fi
-      echo "  paychecks/checks$d.pdf (appended)"
-    else
-      mv "$newpdf" "$target"
-      echo "  paychecks/checks$d.pdf"
+  while IFS= read -r entity <&3; do
+    # Build a temporary staging PDF of this entity's check pages (unrotated —
+    # the checks manifest carries the rotations) plus a checks-split manifest
+    # whose page numbers index into that PDF: front back number paydate frot brot.
+    cmanifest="$workdir/checks-manifest-$entity"
+    : > "$cmanifest"
+    imgs=()
+    p=0
+    while IFS= read -r doc; do
+      imgs+=("$staging/$(jq -r '.pages[0].file' <<<"$doc")")
+      imgs+=("$staging/$(jq -r '.pages[1].file' <<<"$doc")")
+      printf '%d %d %s %s %s %s\n' "$((p + 1))" "$((p + 2))" \
+        "$(jq -r '.fields.check_number' <<<"$doc")" \
+        "$(jq -r '.fields.paydate' <<<"$doc")" \
+        "$(jq -r '.pages[0].rotate' <<<"$doc")" \
+        "$(jq -r '.pages[1].rotate' <<<"$doc")" >> "$cmanifest"
+      p=$((p + 2))
+    done < <(jq -c --arg e "$entity" '.documents[] | select(.type == "paycheck" and .entity == $e)' "$manifest")
+    if ! img2pdf --imgsize "${resolution}dpix${resolution}dpi" \
+         --output "$workdir/checks-staging-$entity.pdf" "${imgs[@]}"; then
+      echo "batch-file: assembly failed for paycheck staging PDF ($entity)" >&2
+      exit 2
     fi
-  done <<<"$paydates"
+    # Split in the workdir (checks-split normalizes each check's pages itself),
+    # and only then file into $outdir: a failure files no paycheck pages, and
+    # appending pre-normalized pages means already-filed checks are never
+    # re-rendered (no JPEG generation loss).
+    if ! checks-split -o "$workdir/paychecks-$entity" "$workdir/checks-staging-$entity.pdf" "$cmanifest" >/dev/null; then
+      echo "batch-file: checks-split failed ($entity)" >&2
+      echo "  no paycheck pages for $entity were filed; the documents listed above" >&2
+      echo "  already were, so re-running this manifest would duplicate them —" >&2
+      echo "  fix the problem and re-file only the paycheck documents" >&2
+      exit 2
+    fi
+    paydates=$(jq -r --arg e "$entity" \
+      '.documents[] | select(.type == "paycheck" and .entity == $e) | .fields.paydate' "$manifest" \
+      | tr -d '-' | sort -u)  # checks-split strips dashes when naming checksYYYYMMDD.pdf
+    while IFS= read -r d; do
+      dir="$outdir/$entity/paychecks/${d:0:4}"
+      mkdir -p "$dir"
+      newpdf="$workdir/paychecks-$entity/checks$d.pdf"
+      target="$dir/checks$d.pdf"
+      rel="$entity/paychecks/${d:0:4}/checks$d.pdf"
+      if [[ -e "$target" ]]; then
+        if ! qpdf --empty --pages "$target" 1-z "$newpdf" 1-z -- "$workdir/merged-$d.pdf" \
+            || ! mv "$workdir/merged-$d.pdf" "$target"; then
+          echo "batch-file: failed to append to $rel" >&2
+          exit 2
+        fi
+        echo "  $rel (appended)"
+      else
+        mv "$newpdf" "$target"
+        echo "  $rel"
+      fi
+      # Sidecar per paydate PDF: the checks it holds, merged across batches.
+      side="$dir/checks$d.json"
+      filed=$(now)
+      [[ -f "$side" ]] || jq -n --arg e "$entity" --arg d "$d" \
+        '{type: "paycheck", entity: $e, name: "checks\($d)",
+          paydate: "\($d[0:4])-\($d[4:6])-\($d[6:8])", checks: [], sources: [], followups: {}}' > "$side"
+      jq --argjson m "$(jq -c . "$manifest")" --arg e "$entity" --arg d "$d" \
+         --argjson src "$source_json" --arg filed "$filed" '
+        def signed: if . == true or . == "y" or . == "yes" then true
+                    elif . == false or . == "n" or . == "no" then false else null end;
+        .checks += [$m.documents[]
+          | select(.type == "paycheck" and .entity == $e and ((.fields.paydate | tostring | gsub("-"; "")) == $d))
+          | {check_number: (.fields.check_number | tonumber),
+             payee: (.fields.payee // null),
+             amount: (.fields.amount // null | if type == "string" then (gsub("[$,]"; "") | tonumber? // null) else . end),
+             signed: (.fields.signed | signed),
+             batch: $src.batch}]
+        | .checks |= (unique_by(.check_number) | sort_by(.check_number))
+        | .sources += [$src] | .filed = $filed' "$side" > "$side.tmp" && mv "$side.tmp" "$side"
+      report=$(paydate_report "$side" "$dir" "$d")
+      if [[ -n "$report" ]]; then
+        status=done note=null
+        echo "    report: $entity/paychecks/${d:0:4}/$report"
+      else
+        status=pending note='"needs amount and signed y/n on every check"'
+      fi
+      jq --arg s "$status" --argjson n "$note" --arg r "$report" --arg filed "$filed" \
+        '.followups.check_report = {status: $s, note: $n, updated: $filed,
+                                    ref: (if $r == "" then null else $r end)}' \
+        "$side" > "$side.tmp" && mv "$side.tmp" "$side"
+      mkdir -p "$(dirname "$index_file")"
+      jq -c --arg e "$entity" --arg d "$d" --arg file "$rel" --argjson src "$source_json" --arg filed "$filed" '
+        .documents[] | select(.type == "paycheck" and .entity == $e and ((.fields.paydate | tostring | gsub("-"; "")) == $d))
+        | {file: $file, type, entity, date: "\($d[0:4])-\($d[4:6])-\($d[6:8])", year: $d[0:4],
+           fields, batch: $src.batch, scanner: $src.scanner, user: $src.user, host: $src.host, filed: $filed}' \
+        "$manifest" >> "$index_file"
+    done <<<"$paydates"
+  done 3< <(jq -r '[.documents[] | select(.type == "paycheck") | .entity] | unique[]' "$manifest")
 fi
 
 # ---------- review items ----------
@@ -307,24 +471,33 @@ fi
 nrev=$(jq '(.review // []) | length' "$manifest")
 for (( i = 0; i < nrev; i++ )); do
   item=$(jq -c ".review[$i]" "$manifest")
-  mkdir -p "$outdir/review"
+  mkdir -p "$outdir/_review"
   base=$(printf 'review-%s-%02d' "$batch_id" "$((i + 1))")
-  pdf=$(unique_target "$outdir/review" "$base")
+  pdf=$(unique_target "$outdir/_review" "$base")
   if ! build_pdf "$item" "$pdf"; then
     rm -f "$pdf"
     echo "batch-file: assembly failed for $(basename "$pdf")" >&2
     exit 2
   fi
-  jq -n --argjson item "$item" --arg batch "$batch_id" \
+  jq -n --argjson item "$item" --argjson src "$source_json" --arg filed "$(now)" \
     '{reason: ($item.reason // "unspecified"), guess: ($item.guess // {}),
-      source: {batch: $batch, pages: [$item.pages[].file]}}' \
+      source: ($src + {pages: [$item.pages[].file]}), filed: $filed}' \
     > "${pdf%.pdf}.json"
-  echo "  review/$(basename "$pdf")  ($(jq -r '.reason // "unspecified"' <<<"$item"))"
+  echo "  _review/$(basename "$pdf")  ($(jq -r '.reason // "unspecified"' <<<"$item"))"
 done
 
-# ---------- cleanup + summary ----------
+# ---------- dashboards, cleanup, summary ----------
 
 echo "Filed $filed_count document(s), $npay paycheck(s), $nrev held for review."
+if (( dashboard )) && command -v scan-catalog >/dev/null 2>&1; then
+  scan-catalog -r "$outdir" dashboard >/dev/null 2>&1 \
+    && echo "Dashboards refreshed: $outdir/dashboard.html" \
+    || echo "batch-file: note — dashboard refresh failed (run: scan-catalog dashboard)" >&2
+fi
+if command -v scan-catalog >/dev/null 2>&1; then
+  npend=$(scan-catalog -r "$outdir" pending 2>/dev/null | wc -l | tr -d ' ')
+  (( npend == 0 )) || echo "Follow-ups pending: $npend (scan-catalog pending)"
+fi
 if (( keep_staging == 0 && nrev == 0 )); then
   rm -rf "$staging"
   echo "Staging removed."

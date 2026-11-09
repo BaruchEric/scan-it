@@ -4,10 +4,14 @@
 # Scans until the ADF empties, then watches the scanner's page-loaded sensor
 # and resumes the moment more paper lands. Pages accumulate as per-page JPEGs
 # in a staging dir for the batch workflow (Claude analysis -> batch-file).
+# Staging stays on local disk (~/.cache/scan-it/batches): only finished PDFs
+# belong in the Drive-synced filing root. batch.json records which scanner
+# and which user made the batch, plus the scan profile's default entity from
+# <filing root>/profiles.json.
 # Works with the Brother ADS-4300N (via escl-scan) and the borrowed ScanSnap
 # iX500 (via SANE/scanimage); auto-detects whichever is connected.
 #
-# Part of the scan-it project (~/Arik/dev/office/scan-it).
+# Part of the scan-it project (~/dev/office/scan-it).
 set -euo pipefail
 
 scanimage_bin="${SCAN_BATCH_SCANIMAGE:-scanimage}"
@@ -30,7 +34,9 @@ Options:
   -g, --gray           grayscale (default: color)
   -r, --resolution N   dpi (default: 300)
   -o, --outdir DIR     parent dir for batch staging dirs
-                       (default: ~/Documents/Scans/.batches)
+                       (default: $SCAN_STAGING or ~/.cache/scan-it/batches)
+  -u, --user SLUG      who is scanning (default: $SCAN_USER, else the account
+                       match in profiles.json, else the login name)
   --resume DIR         continue an interrupted batch staging dir
       --scanner WHICH  brother | ix500 | auto (default: auto — Brother first;
                        env SCAN_SCANNER sets the default)
@@ -49,7 +55,9 @@ source_opt="ADF Duplex"
 mode="Color"
 resolution=300
 idle=60
-outparent="$HOME/Documents/Scans/.batches"
+outparent="${SCAN_STAGING:-$HOME/.cache/scan-it/batches}"
+scan_root="${SCAN_ROOT:-$HOME/My Drive/scans}"
+user_opt=""
 resume_dir=""
 scanner="${SCAN_SCANNER:-auto}"
 scanopts=()
@@ -72,6 +80,10 @@ while [[ $# -gt 0 ]]; do
     --resume)
       [[ $# -ge 2 ]] || { echo "scan-batch: $1 requires a value" >&2; exit 64; }
       resume_dir="$2"; shift ;;
+    -u|--user)
+      [[ $# -ge 2 ]] || { echo "scan-batch: $1 requires a value" >&2; exit 64; }
+      [[ "$2" =~ ^[a-z0-9][a-z0-9-]*$ ]] || { echo "scan-batch: $1 must be a lowercase slug" >&2; exit 64; }
+      user_opt="$2"; shift ;;
     --scanner)
       [[ $# -ge 2 ]] || { echo "scan-batch: $1 requires a value" >&2; exit 64; }
       scanner="$2"; shift ;;
@@ -135,6 +147,34 @@ if [[ "$device_kind" == "escl" && -n "${scanopts[*]:-}" ]]; then
   exit 64
 fi
 
+# Who is scanning, on what: --user, $SCAN_USER, a resumed batch's user, an
+# account match in profiles.json ("accounts": ["login" or "login@host"]),
+# else the login name. The profile matching user + scanner supplies the
+# default entity the analysis starts from.
+host=$(hostname -s 2>/dev/null || echo unknown)
+case "$device_kind" in
+  escl) scanner_slug="brother" ;;
+  fujitsu) scanner_slug="ix500" ;;
+esac
+profiles="$scan_root/profiles.json"
+[[ -f "$profiles" ]] && jq -e . "$profiles" >/dev/null 2>&1 || profiles=""
+scan_user="${user_opt:-${SCAN_USER:-}}"
+if [[ -z "$scan_user" && -n "$resume_dir" ]]; then
+  scan_user=$(jq -r '.user // empty' "${resume_dir%/}/batch.json" 2>/dev/null || true)
+fi
+if [[ -z "$scan_user" && -n "$profiles" ]]; then
+  scan_user=$(jq -r --arg a "${USER:-}" --arg ah "${USER:-}@$host" \
+    'first(.users[]? | select((.accounts // []) | (index($a) or index($ah))) | .slug) // empty' \
+    "$profiles" 2>/dev/null || true)
+fi
+[[ -n "$scan_user" ]] || scan_user=$(printf '%s' "${USER:-unknown}" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9-' '-')
+default_entity=""
+if [[ -n "$profiles" ]]; then
+  default_entity=$(jq -r --arg u "$scan_user" --arg s "$scanner_slug" \
+    'first(.profiles[]? | select((.user == $u or .user == "*") and (.scanner == $s or .scanner == "*"))) | .default_entity // empty' \
+    "$profiles" 2>/dev/null || true)
+fi
+
 if [[ -n "$resume_dir" ]]; then
   staging="${resume_dir%/}"
   [[ -d "$staging/pages" ]] || { echo "scan-batch: not a batch staging dir: $resume_dir" >&2; exit 66; }
@@ -162,8 +202,12 @@ write_batch_json() {
         --arg source "$source_opt" --arg mode "$mode" \
         --argjson resolution "$resolution" \
         --argjson pages "$(page_count)" --argjson chunks "$arr" \
+        --arg scanner "$scanner_slug" --arg device "$device" \
+        --arg user "$scan_user" --arg host "$host" --arg entity "$default_entity" \
     '{batch: $id, started: $started, updated: $updated, source: $source,
-      mode: $mode, resolution: $resolution, pages: $pages, chunks: $chunks}' \
+      mode: $mode, resolution: $resolution, pages: $pages, chunks: $chunks,
+      scanner: $scanner, device: $device, user: $user, host: $host,
+      default_entity: (if $entity == "" then null else $entity end)}' \
     > "$staging/batch.json"
 }
 
@@ -262,7 +306,7 @@ wait_for_paper() {
   finish
 }
 
-echo "Batch $batch_id ($source_opt, $mode, ${resolution}dpi)"
+echo "Batch $batch_id ($source_opt, $mode, ${resolution}dpi) — $scan_user on $scanner_slug${default_entity:+, default entity $default_entity}"
 echo "Feed the ADF. Enter ends the batch; idle timeout ${idle}s."
 
 zero_scans=0   # consecutive scans where the sensor saw paper but 0 pages fed

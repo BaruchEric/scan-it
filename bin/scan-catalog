@@ -1,0 +1,222 @@
+#!/usr/bin/env bash
+# scan-catalog — the read side of the filing tree batch-file writes.
+#
+# Every filed PDF has a JSON sidecar; the sidecars are the source of truth.
+# This tool merges them into one catalog (no OCR text), lists the follow-up
+# workflows still open, marks them done, and renders the HTML dashboards.
+#
+# Part of the scan-it project (~/dev/office/scan-it).
+set -euo pipefail
+
+root="${SCAN_ROOT:-$HOME/My Drive/scans}"
+script_dir=$(cd "$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")" && pwd)
+template="${SCAN_DASHBOARD_TEMPLATE:-$script_dir/../share/dashboard.html}"
+
+workflows="copy quickbooks calendar vault check_report"
+statuses="pending done skipped failed"
+
+usage() {
+  cat <<EOF
+Usage: scan-catalog [-r ROOT] <command> [args]
+
+Commands:
+  build [--entity SLUG]       print the catalog JSON (sidecars merged, no OCR text)
+  pending [WORKFLOW] [--json] list follow-ups still pending or failed
+                              (tab-separated: workflow, status, entity, file)
+  mark <file> <workflow> <status> [--note TEXT] [--ref TEXT]
+                              record a follow-up's outcome in the document's sidecar
+                              file: the PDF or sidecar path, relative to ROOT or absolute
+  dashboard [--open]          write ROOT/dashboard.html (every entity) and
+                              ROOT/<entity>/dashboard.html (that entity only)
+
+Workflows: $workflows
+Statuses:  $statuses
+
+Options:
+  -r, --root DIR   filing root (default: \$SCAN_ROOT or ~/My Drive/scans; now: $root)
+  -h, --help       show this help
+EOF
+}
+
+die() { echo "scan-catalog: $*" >&2; exit "${2:-1}"; }
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -r|--root)
+      [[ $# -ge 2 ]] || die "$1 requires a value" 64
+      root="$2"; shift 2 ;;
+    -h|--help) usage; exit 0 ;;
+    *) break ;;
+  esac
+done
+root="${root%/}"
+[[ $# -gt 0 ]] || { usage >&2; exit 64; }
+cmd="$1"; shift
+command -v jq >/dev/null 2>&1 || die "jq not found"
+
+tmp=$(mktemp -d -t scan-catalog)
+trap 'rm -rf "$tmp"' EXIT
+
+# One JSON line per sidecar: {path, d}. Unreadable files are skipped loudly.
+collect() {
+  [[ -d "$root" ]] || return 0
+  find "$root" -type f -name '*.json' \
+    -not -path "$root/_index/*" -not -path "$root/.*" -not -path "$root/*/.*" \
+    -not -name entities.json -not -name profiles.json -print0 \
+  | while IFS= read -r -d '' f; do
+      jq -c --arg path "$f" '{path: $path, d: .}' "$f" 2>/dev/null \
+        || echo "scan-catalog: skipping unreadable $f" >&2
+    done
+}
+
+registry() { # <file> <default-json>
+  if [[ -f "$1" ]] && jq -e . "$1" >/dev/null 2>&1; then jq -c . "$1"; else echo "$2"; fi
+}
+
+build() { # [entity] -> catalog JSON on stdout
+  local entity="${1:-}" scope prefix
+  scope="${entity:-all}"
+  prefix=""; [[ -z "$entity" ]] || prefix="../"
+  collect > "$tmp/sidecars.jsonl"
+  jq -s --arg root "$root" --arg scope "$scope" --arg prefix "$prefix" \
+     --arg now "$(date +%Y-%m-%dT%H:%M:%S%z)" \
+     --argjson reg "$(registry "$root/entities.json" '{"entities":[]}')" \
+     --argjson prof "$(registry "$root/profiles.json" '{}')" '
+    def rel: .path | ltrimstr($root + "/");
+    def pdf: rel | sub("[.]json$"; ".pdf");
+    def iso: if type == "string" and test("^[0-9]{4}-[0-9]{2}-[0-9]{2}$") then . else null end;
+    def num: if type == "number" then .
+             elif type == "string" then (gsub("[$,]"; "") | tonumber? // null) else null end;
+    def name_amount: (capture(" [$](?<a>[0-9,]+[.][0-9]{2})$")? | .a | gsub(","; "") | tonumber) // null;
+    def keep: $scope == "all" or . == $scope;
+    . as $all
+    | {
+        generated: $now, scope: $scope, link_prefix: $prefix,
+        entities: [$reg.entities[] | {slug, name: (.name // .slug), kind: (.kind // "business")}
+                   | select(.slug | keep)],
+        users: [($prof.users // [])[] | {slug, name: (.name // .slug)}],
+        scanners: [($prof.scanners // [])[] | {slug, model: (.model // .slug)}],
+        documents: [$all[]
+          | select((rel | startswith("_review/") | not) and (.d | type == "object")
+                   and (.d.type | type == "string") and .d.type != "paycheck" and (.d.name | type == "string"))
+          | select(.d.entity // "" | keep)
+          | (.d.date // (.d.fields.date | iso)) as $date
+          | {file: pdf, type: .d.type, entity: (.d.entity // null), name: .d.name,
+             date: $date,
+             year: (.d.year // ($date // "" | .[0:4] | select(. != "")) // null),
+             amount: ((.d.name | name_amount) // (.d.fields.total | num) // (.d.fields.amount | num)),
+             pages: ((.d.source.pages // []) | length),
+             fields: (.d.fields // {}), confidence: (.d.confidence // "high"),
+             source: ((.d.source // {}) | del(.pages)), filed: (.d.filed // null),
+             copies: (.d.copies // []), followups: (.d.followups // {})}],
+        paychecks: [$all[]
+          | select((.d | type == "object") and .d.type == "paycheck")
+          | select(.d.entity // "" | keep)
+          | {file: pdf, entity: .d.entity, paydate: .d.paydate,
+             checks: [(.d.checks // [])[] | {check_number, payee, amount, signed}],
+             sources: (.d.sources // []), followups: (.d.followups // {})}],
+        review: [$all[]
+          | select(rel | startswith("_review/"))
+          | select($scope == "all" or (.d.guess.entity // "") == $scope)
+          | {file: pdf, reason: (.d.reason // "unspecified"), guess: (.d.guess // {}),
+             source: ((.d.source // {}) | del(.pages))}]
+      }
+    | .documents |= sort_by(.date // .filed // "") ' "$tmp/sidecars.jsonl"
+}
+
+resolve_sidecar() { # <file> -> sidecar path
+  local f="$1"
+  [[ "$f" == /* ]] || f="$root/$f"
+  f="${f%.pdf}"; f="${f%.json}.json"
+  [[ -f "$f" ]] || die "no sidecar at $f"
+  echo "$f"
+}
+
+case "$cmd" in
+  build)
+    entity=""
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --entity) [[ $# -ge 2 ]] || die "--entity requires a value" 64; entity="$2"; shift 2 ;;
+        *) die "build: unknown argument: $1" 64 ;;
+      esac
+    done
+    build "$entity" ;;
+
+  pending)
+    want="" as_json=0
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --json) as_json=1; shift ;;
+        -*) die "pending: unknown option: $1" 64 ;;
+        *) want="$1"; shift ;;
+      esac
+    done
+    [[ -z "$want" || " $workflows " == *" $want "* ]] || die "unknown workflow: $want ($workflows)" 64
+    build "" | jq -c --arg want "$want" '
+      (.documents[] | . as $doc | (.followups | to_entries[])
+        | {workflow: .key, status: .value.status, note: .value.note, entity: $doc.entity,
+           type: $doc.type, file: $doc.file, date: $doc.date, amount: $doc.amount, fields: $doc.fields}),
+      (.paychecks[] | . as $p | (.followups | to_entries[])
+        | {workflow: .key, status: .value.status, note: .value.note, entity: $p.entity,
+           type: "paycheck", file: $p.file, date: $p.paydate, amount: null, fields: {}})
+      | select(.status == "pending" or .status == "failed")
+      | select($want == "" or .workflow == $want)' > "$tmp/pending.jsonl"
+    if (( as_json )); then
+      cat "$tmp/pending.jsonl"
+    else
+      jq -r '[.workflow, .status, (.entity // "-"), .file] | @tsv' "$tmp/pending.jsonl"
+    fi ;;
+
+  mark)
+    [[ $# -ge 3 ]] || die "usage: mark <file> <workflow> <status> [--note TEXT] [--ref TEXT]" 64
+    file="$1" wf="$2" st="$3"; shift 3
+    note="" ref=""
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --note) [[ $# -ge 2 ]] || die "--note requires a value" 64; note="$2"; shift 2 ;;
+        --ref) [[ $# -ge 2 ]] || die "--ref requires a value" 64; ref="$2"; shift 2 ;;
+        *) die "mark: unknown argument: $1" 64 ;;
+      esac
+    done
+    [[ " $workflows " == *" $wf "* ]] || die "unknown workflow: $wf ($workflows)" 64
+    [[ " $statuses " == *" $st "* ]] || die "unknown status: $st ($statuses)" 64
+    side=$(resolve_sidecar "$file")
+    jq --arg wf "$wf" --arg st "$st" --arg note "$note" --arg ref "$ref" \
+       --arg now "$(date +%Y-%m-%dT%H:%M:%S%z)" '
+      .followups = ((.followups // {}) + {($wf): {status: $st,
+        note: (if $note == "" then null else $note end),
+        ref: (if $ref == "" then null else $ref end), updated: $now}})' \
+      "$side" > "$side.tmp" && mv "$side.tmp" "$side"
+    echo "${side#"$root"/}: $wf -> $st" ;;
+
+  dashboard)
+    open_it=0
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --open) open_it=1; shift ;;
+        *) die "dashboard: unknown argument: $1" 64 ;;
+      esac
+    done
+    [[ -f "$template" ]] || die "dashboard template missing: $template"
+    [[ -d "$root" ]] || die "no filing root at $root"
+    render() { # <catalog.json> <out.html>
+      sed 's#</#<\\/#g' "$1" > "$tmp/escaped.json"
+      awk -v f="$tmp/escaped.json" \
+        'index($0, "/*__CATALOG__*/") { while ((getline l < f) > 0) print l; next } { print }' \
+        "$template" > "$2.tmp"
+      mv "$2.tmp" "$2"
+    }
+    build "" > "$tmp/all.json"
+    render "$tmp/all.json" "$root/dashboard.html"
+    echo "$root/dashboard.html"
+    while IFS= read -r ent; do
+      [[ -n "$ent" && -d "$root/$ent" ]] || continue
+      build "$ent" > "$tmp/$ent.json"
+      render "$tmp/$ent.json" "$root/$ent/dashboard.html"
+      echo "$root/$ent/dashboard.html"
+    done < <(jq -r '[(.documents[], .paychecks[]) | .entity // empty] | unique[]' "$tmp/all.json")
+    if (( open_it )); then open "$root/dashboard.html"; fi ;;
+
+  *) die "unknown command: $cmd" 64 ;;
+esac

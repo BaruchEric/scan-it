@@ -129,6 +129,30 @@ else
   ix500_usable=$(( fail == ix500_fail_before ? 1 : 0 ))
 fi
 
+# ---- filing root (warnings only: scanning works without it) ----
+scan_root="${SCAN_ROOT:-$HOME/My Drive/scans}"
+printf '\n%sFiling root%s  %s\n' "$bold" "$reset" "$scan_root"
+warn() { printf '%sWARN%s  %s\n      hint: %s\n' "$yellow" "$reset" "$1" "$2"; }
+if [[ -d "$scan_root" ]]; then
+  ok "filing root exists"
+  for reg in entities.json profiles.json; do
+    if [[ ! -f "$scan_root/$reg" ]]; then
+      warn "$reg present" "batch-file and scan-batch read it; see the scan skill for the format"
+    elif jq -e . "$scan_root/$reg" >/dev/null 2>&1; then
+      ok "$reg valid JSON"
+    else
+      warn "$reg valid JSON" "fix the syntax in $scan_root/$reg"
+    fi
+  done
+else
+  warn "filing root exists" "mkdir -p \"$scan_root\" (or set SCAN_ROOT); batch-file creates it on first filing"
+fi
+if [[ -f "$script_dir/../share/dashboard.html" ]]; then
+  ok "dashboard template present"
+else
+  warn "dashboard template present" "share/dashboard.html is missing from the scan-it checkout"
+fi
+
 printf '\n%s%d passed, %d failed%s\n' "$bold" "$pass" "$fail" "$reset"
 
 if (( brother_usable == 0 && ix500_usable == 0 )); then

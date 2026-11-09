@@ -1,18 +1,25 @@
 #!/usr/bin/env bats
-# bin/batch-file: manifest validation and deterministic filing.
+# bin/batch-file: manifest validation and deterministic filing into the
+# entity-first tree: <root>/<entity>/<type-folder>/[<YYYY>/]<name>.pdf
 
 setup() {
   TMP=$(mktemp -d)
-  OUT="$TMP/out"
+  OUT="$TMP/drive/scans"          # filing root; its parent is the Drive root
+  DRIVE="$TMP/drive"
   STAGING="$TMP/batch-20260611-120000"
   mkdir -p "$STAGING/pages"
   cat > "$STAGING/batch.json" <<'EOF'
-{"batch":"batch-20260611-120000","started":"2026-06-11T12:00:00-0400","resolution":300}
+{"batch":"batch-20260611-120000","started":"2026-06-11T12:00:00-0400","resolution":300,
+ "scanner":"ix500","user":"tester","host":"scanbox","default_entity":"rio-laundromat"}
 EOF
   BATCH_FILE="$BATS_TEST_DIRNAME/../bin/batch-file"
 }
 
 teardown() { rm -rf "$TMP"; }
+
+bf() { "$BATCH_FILE" -o "$OUT" --no-text-layer --no-dashboard "$@"; }
+
+index_lines() { cat "$OUT"/_index/*.jsonl 2>/dev/null; }
 
 page() { # <filename> <label> [WxH]
   magick -size "${3:-600x800}" xc:white \
@@ -21,12 +28,19 @@ page() { # <filename> <label> [WxH]
     -draw "text 40,100 '$2'" "$STAGING/pages/$1"
 }
 
+one_doc() { # <document-json> — a manifest holding one document on page 1
+  cat > "$STAGING/manifest.json" <<EOF
+{ "batch": "batch-20260611-120000", "documents": [ $1 ] }
+EOF
+}
+
 receipt_manifest() { # one receipt on page 1, blank back dropped
   cat > "$STAGING/manifest.json" <<'EOF'
 {
   "batch": "batch-20260611-120000",
   "documents": [
     { "type": "receipt", "name": "receipt-2026-06-08-home-depot $45.23",
+      "entity": "rio-laundromat",
       "pages": [ { "file": "pages/page-001.jpg", "rotate": 0 } ],
       "fields": { "vendor": "Home Depot", "date": "2026-06-08", "total": 45.23 },
       "text": [ "HOME DEPOT 45.23" ], "confidence": "high" }
@@ -36,54 +50,71 @@ receipt_manifest() { # one receipt on page 1, blank back dropped
 EOF
 }
 
-@test "files a receipt: PDF, sidecar, index line" {
-  page page-001.jpg RECEIPT
-  page page-002.jpg BLANK
-  receipt_manifest
-  run "$BATCH_FILE" -o "$OUT" --no-text-layer "$STAGING"
-  [ "$status" -eq 0 ]
-  pdf="$OUT/receipts/receipt-2026-06-08-home-depot \$45.23.pdf"
-  [ -f "$pdf" ]
-  [ "$(qpdf --show-npages "$pdf")" = "1" ]
-  side="$OUT/receipts/receipt-2026-06-08-home-depot \$45.23.json"
-  [ "$(jq -r '.fields.vendor' "$side")" = "Home Depot" ]
-  [ "$(jq -r '.source.batch' "$side")" = "batch-20260611-120000" ]
-  [ "$(jq -r '.text[0]' "$side")" = "HOME DEPOT 45.23" ]
-  [ "$(wc -l < "$OUT/index.jsonl" | tr -d ' ')" = "1" ]
-  [ "$(jq -r '.file' "$OUT/index.jsonl")" = "receipts/receipt-2026-06-08-home-depot \$45.23.pdf" ]
-}
+RECEIPT_REL='rio-laundromat/receipts/2026/receipt-2026-06-08-home-depot $45.23'
 
-@test "files a medical document under medical/ with no amount suffix" {
-  page page-001.jpg LABS
-  cat > "$STAGING/manifest.json" <<'EOF'
+entities_registry() {
+  mkdir -p "$OUT"
+  cat > "$OUT/entities.json" <<'EOF'
 {
-  "batch": "batch-20260611-120000",
-  "documents": [
-    { "type": "medical", "name": "lab-results-timma-2026-06-01",
-      "pages": [ { "file": "pages/page-001.jpg", "rotate": 0 } ] }
+  "entities": [
+    { "slug": "personal", "name": "Personal", "kind": "personal",
+      "copies": { "tax": "Baruch/Tax/{year}", "medical": "Baruch/Health/MedicalRecords" } },
+    { "slug": "rio-laundromat", "name": "RIO LAUNDROMAT LLC", "kind": "business",
+      "quickbooks": true,
+      "copies": { "tax": "8328 De Soto Ave/Tax/{year}/Tax Supporting Docs" } },
+    { "slug": "rio-cycles", "name": "RIO CYCLES LLC", "kind": "business" }
   ]
 }
 EOF
-  run "$BATCH_FILE" -o "$OUT" --no-text-layer "$STAGING"
+}
+
+@test "files a receipt under entity/type/year with sidecar and index line" {
+  page page-001.jpg RECEIPT
+  page page-002.jpg BLANK
+  receipt_manifest
+  run bf "$STAGING"
   [ "$status" -eq 0 ]
-  [ -f "$OUT/medical/lab-results-timma-2026-06-01.pdf" ]
+  pdf="$OUT/$RECEIPT_REL.pdf"
+  [ -f "$pdf" ]
+  [ "$(qpdf --show-npages "$pdf")" = "1" ]
+  side="$OUT/$RECEIPT_REL.json"
+  [ "$(jq -r '.fields.vendor' "$side")" = "Home Depot" ]
+  [ "$(jq -r '.entity' "$side")" = "rio-laundromat" ]
+  [ "$(jq -r '.year' "$side")" = "2026" ]
+  [ "$(jq -r '.date' "$side")" = "2026-06-08" ]
+  [ "$(jq -r '.source.batch' "$side")" = "batch-20260611-120000" ]
+  [ "$(jq -r '.source.scanner' "$side")" = "ix500" ]
+  [ "$(jq -r '.source.user' "$side")" = "tester" ]
+  [ "$(jq -r '.source.host' "$side")" = "scanbox" ]
+  [ "$(jq -r '.text[0]' "$side")" = "HOME DEPOT 45.23" ]
+  # Index: one file per user@filing-host, so two machines never append to one file.
+  [ "$(ls "$OUT/_index")" = "tester@$(hostname -s).jsonl" ]
+  [ "$(index_lines | wc -l | tr -d ' ')" = "1" ]
+  [ "$(index_lines | jq -r '.file')" = "$RECEIPT_REL.pdf" ]
+  [ "$(index_lines | jq -r '.scanner')" = "ix500" ]
+}
+
+@test "medical files under personal/medical (no year folder) with a vault follow-up" {
+  page page-001.jpg LABS
+  one_doc '{ "type": "medical", "name": "lab-results-timma-2026-06-01", "entity": "personal",
+             "pages": [ { "file": "pages/page-001.jpg", "rotate": 0 } ],
+             "fields": { "provider": "Timma", "drawn": "2026-06-01" } }'
+  run bf "$STAGING"
+  [ "$status" -eq 0 ]
+  side="$OUT/personal/medical/lab-results-timma-2026-06-01.json"
+  [ -f "${side%.json}.pdf" ]
+  [ "$(jq -r '.followups.vault.status' "$side")" = "pending" ]
+  [ "$(jq -r '.date' "$side")" = "2026-06-01" ]
 }
 
 @test "applies rotation so the page renders upright" {
   page page-001.jpg SIDEWAYS
-  cat > "$STAGING/manifest.json" <<'EOF'
-{
-  "batch": "batch-20260611-120000",
-  "documents": [
-    { "type": "misc", "name": "misc-2026-06-11-sideways",
-      "pages": [ { "file": "pages/page-001.jpg", "rotate": 90 } ] }
-  ]
-}
-EOF
-  run "$BATCH_FILE" -o "$OUT" --no-text-layer "$STAGING"
+  one_doc '{ "type": "misc", "name": "misc-2026-06-11-sideways", "entity": "personal",
+             "pages": [ { "file": "pages/page-001.jpg", "rotate": 90 } ] }'
+  run bf "$STAGING"
   [ "$status" -eq 0 ]
   # 600x800 px at 300 dpi = 144x192 pt; rotated 90 -> 192x144 pt (landscape).
-  pdfinfo "$OUT/misc/misc-2026-06-11-sideways.pdf" | grep 'Page size' | grep -q '192 x 144'
+  pdfinfo "$OUT/personal/misc/misc-2026-06-11-sideways.pdf" | grep 'Page size' | grep -q '192 x 144'
 }
 
 @test "merges a multi-sheet invoice into one PDF" {
@@ -95,46 +126,40 @@ EOF
 {
   "batch": "batch-20260611-120000",
   "documents": [
-    { "type": "invoice", "name": "invoice-2026-05-31-coned $1,042.50",
+    { "type": "invoice", "name": "invoice-2026-05-31-coned $1,042.50", "entity": "rio-cycles",
       "pages": [ { "file": "pages/page-001.jpg", "rotate": 0 },
                  { "file": "pages/page-003.jpg", "rotate": 0 } ],
-      "fields": { "vendor": "ConEd", "invoice_number": "9912", "amount": 1042.50 } }
+      "fields": { "vendor": "ConEd", "invoice_number": "9912", "date": "2026-05-31", "amount": 1042.50 } }
   ],
   "dropped": [ { "file": "pages/page-002.jpg", "reason": "blank back" },
                { "file": "pages/page-004.jpg", "reason": "blank back" } ]
 }
 EOF
-  run "$BATCH_FILE" -o "$OUT" --no-text-layer "$STAGING"
+  run bf "$STAGING"
   [ "$status" -eq 0 ]
-  [ "$(qpdf --show-npages "$OUT/invoices/invoice-2026-05-31-coned \$1,042.50.pdf")" = "2" ]
+  [ "$(qpdf --show-npages "$OUT/rio-cycles/invoices/2026/invoice-2026-05-31-coned \$1,042.50.pdf")" = "2" ]
 }
 
 @test "name collision gets a -2 suffix, never overwrites" {
   page page-001.jpg RECEIPT
   page page-002.jpg BLANK
   receipt_manifest
-  mkdir -p "$OUT/receipts"
-  printf existing > "$OUT/receipts/receipt-2026-06-08-home-depot \$45.23.pdf"
-  run "$BATCH_FILE" -o "$OUT" --no-text-layer --keep-staging "$STAGING"
+  mkdir -p "$(dirname "$OUT/$RECEIPT_REL")"
+  printf existing > "$OUT/$RECEIPT_REL.pdf"
+  run bf --keep-staging "$STAGING"
   [ "$status" -eq 0 ]
-  [ "$(cat "$OUT/receipts/receipt-2026-06-08-home-depot \$45.23.pdf")" = "existing" ]
-  [ -f "$OUT/receipts/receipt-2026-06-08-home-depot \$45.23-2.pdf" ]
-  [ -f "$OUT/receipts/receipt-2026-06-08-home-depot \$45.23-2.json" ]
+  [ "$(cat "$OUT/$RECEIPT_REL.pdf")" = "existing" ]
+  [ -f "$OUT/$RECEIPT_REL-2.pdf" ]
+  [ -f "$OUT/$RECEIPT_REL-2.json" ]
 }
 
 @test "unaccounted page: exit 1, nothing written" {
   page page-001.jpg RECEIPT
   page page-002.jpg ORPHAN
-  cat > "$STAGING/manifest.json" <<'EOF'
-{
-  "batch": "batch-20260611-120000",
-  "documents": [
-    { "type": "receipt", "name": "receipt-2026-06-08-x $1.00",
-      "pages": [ { "file": "pages/page-001.jpg", "rotate": 0 } ] }
-  ]
-}
-EOF
-  run "$BATCH_FILE" -o "$OUT" --no-text-layer "$STAGING"
+  one_doc '{ "type": "receipt", "name": "receipt-2026-06-08-x $1.00", "entity": "personal",
+             "fields": { "date": "2026-06-08" },
+             "pages": [ { "file": "pages/page-001.jpg", "rotate": 0 } ] }'
+  run bf "$STAGING"
   [ "$status" -eq 1 ]
   [ ! -d "$OUT" ]
 }
@@ -145,70 +170,73 @@ EOF
 {
   "batch": "batch-20260611-120000",
   "documents": [
-    { "type": "receipt", "name": "receipt-2026-06-08-a $1.00",
+    { "type": "receipt", "name": "receipt-2026-06-08-a $1.00", "entity": "personal",
+      "fields": { "date": "2026-06-08" },
       "pages": [ { "file": "pages/page-001.jpg", "rotate": 0 } ] },
-    { "type": "receipt", "name": "receipt-2026-06-08-b $2.00",
+    { "type": "receipt", "name": "receipt-2026-06-08-b $2.00", "entity": "personal",
+      "fields": { "date": "2026-06-08" },
       "pages": [ { "file": "pages/page-001.jpg", "rotate": 0 } ] }
   ]
 }
 EOF
-  run "$BATCH_FILE" -o "$OUT" --no-text-layer "$STAGING"
+  run bf "$STAGING"
   [ "$status" -eq 1 ]
   [ ! -d "$OUT" ]
 }
 
 @test "bad rotation value: exit 1, nothing written" {
   page page-001.jpg RECEIPT
-  cat > "$STAGING/manifest.json" <<'EOF'
-{
-  "batch": "batch-20260611-120000",
-  "documents": [
-    { "type": "receipt", "name": "receipt-2026-06-08-x $1.00",
-      "pages": [ { "file": "pages/page-001.jpg", "rotate": 45 } ] }
-  ]
-}
-EOF
-  run "$BATCH_FILE" -o "$OUT" --no-text-layer "$STAGING"
+  one_doc '{ "type": "receipt", "name": "receipt-2026-06-08-x $1.00", "entity": "personal",
+             "fields": { "date": "2026-06-08" },
+             "pages": [ { "file": "pages/page-001.jpg", "rotate": 45 } ] }'
+  run bf "$STAGING"
   [ "$status" -eq 1 ]
   [ ! -d "$OUT" ]
 }
 
 @test "bad document name: exit 1, nothing written" {
   page page-001.jpg RECEIPT
-  cat > "$STAGING/manifest.json" <<'EOF'
-{
-  "batch": "batch-20260611-120000",
-  "documents": [
-    { "type": "receipt", "name": "../escape",
-      "pages": [ { "file": "pages/page-001.jpg", "rotate": 0 } ] }
-  ]
-}
-EOF
-  run "$BATCH_FILE" -o "$OUT" --no-text-layer "$STAGING"
+  one_doc '{ "type": "receipt", "name": "../escape", "entity": "personal",
+             "pages": [ { "file": "pages/page-001.jpg", "rotate": 0 } ] }'
+  run bf "$STAGING"
   [ "$status" -eq 1 ]
+  [ ! -d "$OUT" ]
+}
+
+@test "missing entity: exit 1, nothing written (the tree is entity first)" {
+  page page-001.jpg LETTER
+  one_doc '{ "type": "letter", "name": "letter-2026-06-01-x",
+             "pages": [ { "file": "pages/page-001.jpg", "rotate": 0 } ] }'
+  run bf "$STAGING"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"every document needs an entity"* ]]
+  [ ! -d "$OUT" ]
+}
+
+@test "receipt without a usable date: exit 1 (no year folder to pick)" {
+  page page-001.jpg RECEIPT
+  one_doc '{ "type": "receipt", "name": "receipt-x $1.00", "entity": "personal",
+             "fields": { "date": "06/08/2026" },
+             "pages": [ { "file": "pages/page-001.jpg", "rotate": 0 } ] }'
+  run bf "$STAGING"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"YYYY-MM-DD"* ]]
   [ ! -d "$OUT" ]
 }
 
 @test "paycheck missing paydate: exit 1, nothing written" {
   page page-001.jpg CHECK
   page page-002.jpg BACK
-  cat > "$STAGING/manifest.json" <<'EOF'
-{
-  "batch": "batch-20260611-120000",
-  "documents": [
-    { "type": "paycheck",
-      "pages": [ { "file": "pages/page-001.jpg", "rotate": 0 },
-                 { "file": "pages/page-002.jpg", "rotate": 0 } ],
-      "fields": { "check_number": 1001 } }
-  ]
-}
-EOF
-  run "$BATCH_FILE" -o "$OUT" --no-text-layer "$STAGING"
+  one_doc '{ "type": "paycheck", "entity": "rio-laundromat",
+             "pages": [ { "file": "pages/page-001.jpg", "rotate": 0 },
+                        { "file": "pages/page-002.jpg", "rotate": 0 } ],
+             "fields": { "check_number": 1001 } }'
+  run bf "$STAGING"
   [ "$status" -eq 1 ]
   [ ! -d "$OUT" ]
 }
 
-@test "review item files into review/ with reason sidecar; staging kept" {
+@test "review item files into _review/ with reason and source; staging kept" {
   page page-001.jpg MYSTERY
   cat > "$STAGING/manifest.json" <<'EOF'
 {
@@ -216,15 +244,16 @@ EOF
   "documents": [],
   "review": [
     { "pages": [ { "file": "pages/page-001.jpg", "rotate": 0 } ],
-      "reason": "date unreadable", "guess": { "type": "receipt" } }
+      "reason": "date unreadable", "guess": { "type": "receipt", "entity": "personal" } }
   ]
 }
 EOF
-  run "$BATCH_FILE" -o "$OUT" --no-text-layer "$STAGING"
+  run bf "$STAGING"
   [ "$status" -eq 0 ]
-  pdf="$OUT/review/review-batch-20260611-120000-01.pdf"
+  pdf="$OUT/_review/review-batch-20260611-120000-01.pdf"
   [ -f "$pdf" ]
   [ "$(jq -r '.reason' "${pdf%.pdf}.json")" = "date unreadable" ]
+  [ "$(jq -r '.source.user' "${pdf%.pdf}.json")" = "tester" ]
   [ -d "$STAGING" ]
 }
 
@@ -232,7 +261,7 @@ EOF
   page page-001.jpg RECEIPT
   page page-002.jpg BLANK
   receipt_manifest
-  run "$BATCH_FILE" -o "$OUT" --no-text-layer "$STAGING"
+  run bf "$STAGING"
   [ "$status" -eq 0 ]
   [ ! -d "$STAGING" ]
 }
@@ -241,7 +270,7 @@ EOF
   page page-001.jpg RECEIPT
   page page-002.jpg BLANK
   receipt_manifest
-  run "$BATCH_FILE" -o "$OUT" --no-text-layer --keep-staging "$STAGING"
+  run bf --keep-staging "$STAGING"
   [ "$status" -eq 0 ]
   [ -d "$STAGING" ]
 }
@@ -249,38 +278,24 @@ EOF
 @test "multi-page doc preserves each page (regression: temp-file collision)" {
   page page-001.jpg FIRST 600x800
   page page-002.jpg SECOND 800x600
-  cat > "$STAGING/manifest.json" <<'EOF'
-{
-  "batch": "batch-20260611-120000",
-  "documents": [
-    { "type": "misc", "name": "misc-2026-06-11-twopage",
-      "pages": [ { "file": "pages/page-001.jpg", "rotate": 0 },
-                 { "file": "pages/page-002.jpg", "rotate": 0 } ] }
-  ]
-}
-EOF
-  run "$BATCH_FILE" -o "$OUT" --no-text-layer "$STAGING"
+  one_doc '{ "type": "misc", "name": "misc-2026-06-11-twopage", "entity": "personal",
+             "pages": [ { "file": "pages/page-001.jpg", "rotate": 0 },
+                        { "file": "pages/page-002.jpg", "rotate": 0 } ] }'
+  run bf "$STAGING"
   [ "$status" -eq 0 ]
-  info=$(pdfinfo -f 1 -l 2 "$OUT/misc/misc-2026-06-11-twopage.pdf")
+  info=$(pdfinfo -f 1 -l 2 "$OUT/personal/misc/misc-2026-06-11-twopage.pdf")
   echo "$info" | grep 'Page    1' | grep -q '144 x 192'
   echo "$info" | grep 'Page    2' | grep -q '192 x 144'
 }
 
 @test "assembly failure: exit 2, no orphan PDF, no index line" {
   printf 'not a jpeg' > "$STAGING/pages/page-001.jpg"
-  cat > "$STAGING/manifest.json" <<'EOF'
-{
-  "batch": "batch-20260611-120000",
-  "documents": [
-    { "type": "misc", "name": "misc-2026-06-11-corrupt",
-      "pages": [ { "file": "pages/page-001.jpg", "rotate": 90 } ] }
-  ]
-}
-EOF
-  run "$BATCH_FILE" -o "$OUT" --no-text-layer "$STAGING"
+  one_doc '{ "type": "misc", "name": "misc-2026-06-11-corrupt", "entity": "personal",
+             "pages": [ { "file": "pages/page-001.jpg", "rotate": 90 } ] }'
+  run bf "$STAGING"
   [ "$status" -eq 2 ]
-  [ ! -e "$OUT/misc/misc-2026-06-11-corrupt.pdf" ]
-  [ ! -e "$OUT/index.jsonl" ]
+  [ ! -e "$OUT/personal/misc/misc-2026-06-11-corrupt.pdf" ]
+  [ ! -d "$OUT/_index" ]
   [ -d "$STAGING" ]
 }
 
@@ -290,17 +305,38 @@ EOF
 {
   "batch": "../evil",
   "documents": [
-    { "type": "receipt", "name": "receipt-2026-06-08-x $1.00",
+    { "type": "receipt", "name": "receipt-2026-06-08-x $1.00", "entity": "personal",
+      "fields": { "date": "2026-06-08" },
       "pages": [ { "file": "pages/page-001.jpg", "rotate": 0 } ] }
   ]
 }
 EOF
-  run "$BATCH_FILE" -o "$OUT" --no-text-layer "$STAGING"
+  run bf "$STAGING"
   [ "$status" -eq 1 ]
   [ ! -d "$OUT" ]
 }
 
-@test "paychecks route through checks-split, which normalizes each page" {
+stub_normalize() {
+  # The real --page mode trims/deskews via magick (slow); routing is what we
+  # test here, so record each invocation and emulate --page with a copy.
+  mkdir -p "$TMP/bin"
+  cat > "$TMP/bin/checks-normalize" <<'EOF'
+#!/usr/bin/env bash
+echo "$@" >> "${NORMALIZE_LOG:?}"
+if [ "$1" = "--page" ]; then cp "$2" "$3"; fi
+EOF
+  chmod +x "$TMP/bin/checks-normalize"
+  export NORMALIZE_LOG="$TMP/normalize.log"
+}
+
+bf_checks() { # batch-file with the stubbed normalizer and the repo's checks tools
+  env PATH="$TMP/bin:$BATS_TEST_DIRNAME/../bin:$PATH" NORMALIZE_LOG="$NORMALIZE_LOG" \
+    "$BATCH_FILE" -o "$OUT" --no-text-layer --no-dashboard "$@"
+}
+
+PAY_DIR_REL='rio-laundromat/paychecks/2026'
+
+@test "paychecks route through checks-split into entity/paychecks/year with a sidecar and report" {
   page page-001.jpg "CHECK 1002" 1200x500
   page page-002.jpg "BACK 1002" 1200x500
   page page-003.jpg "CHECK 1001" 1200x500
@@ -309,74 +345,63 @@ EOF
 {
   "batch": "batch-20260611-120000",
   "documents": [
-    { "type": "paycheck",
+    { "type": "paycheck", "entity": "rio-laundromat",
       "pages": [ { "file": "pages/page-001.jpg", "rotate": 0 },
                  { "file": "pages/page-002.jpg", "rotate": 0 } ],
       "fields": { "check_number": 1002, "paydate": "20260605",
-                  "payee": "Jane Doe", "amount": 1234.56 } },
-    { "type": "paycheck",
+                  "payee": "Jane Doe", "amount": 1234.56, "signed": true } },
+    { "type": "paycheck", "entity": "rio-laundromat",
       "pages": [ { "file": "pages/page-003.jpg", "rotate": 0 },
                  { "file": "pages/page-004.jpg", "rotate": 0 } ],
       "fields": { "check_number": 1001, "paydate": "20260605",
-                  "payee": "John Doe", "amount": 1100.00 } }
+                  "payee": "John Doe", "amount": 1100.00, "signed": "n" } }
   ]
 }
 EOF
-  # Stub checks-normalize: the real --page mode trims/deskews via magick
-  # (slow); routing is what we test here, so record each invocation and
-  # emulate --page with a copy-through.
-  mkdir -p "$TMP/bin"
-  cat > "$TMP/bin/checks-normalize" <<'EOF'
-#!/usr/bin/env bash
-echo "$@" >> "${NORMALIZE_LOG:?}"
-if [ "$1" = "--page" ]; then cp "$2" "$3"; fi
-EOF
-  chmod +x "$TMP/bin/checks-normalize"
-  export NORMALIZE_LOG="$TMP/normalize.log"
-  run env PATH="$TMP/bin:$BATS_TEST_DIRNAME/../bin:$PATH" NORMALIZE_LOG="$NORMALIZE_LOG" \
-    "$BATCH_FILE" -o "$OUT" --no-text-layer "$STAGING"
+  stub_normalize
+  run bf_checks "$STAGING"
   [ "$status" -eq 0 ]
-  [ -f "$OUT/paychecks/checks20260605.pdf" ]
-  [ "$(qpdf --show-npages "$OUT/paychecks/checks20260605.pdf")" = "4" ]
+  pdf="$OUT/$PAY_DIR_REL/checks20260605.pdf"
+  [ -f "$pdf" ]
+  [ "$(qpdf --show-npages "$pdf")" = "4" ]
   # One --page invocation per check side (front, back, front, back), on
   # workdir images — normalized BEFORE filing; the filed target is never
   # reprocessed.
   [ "$(wc -l < "$NORMALIZE_LOG" | tr -d ' ')" = "4" ]
   [ "$(awk '$1 != "--page"' "$NORMALIZE_LOG" | wc -l | tr -d ' ')" = "0" ]
   [ "$(awk '{printf "%s ", $NF}' "$NORMALIZE_LOG")" = "front back front back " ]
-  ! grep -q "$OUT/paychecks" "$NORMALIZE_LOG"
+  ! grep -q "$OUT/rio-laundromat" "$NORMALIZE_LOG"
+  side="${pdf%.pdf}.json"
+  [ "$(jq -r '.paydate' "$side")" = "2026-06-05" ]
+  [ "$(jq -c '[.checks[].check_number]' "$side")" = "[1001,1002]" ]
+  [ "$(jq -c '[.checks[].signed]' "$side")" = "[false,true]" ]
+  [ "$(jq -r '.sources[0].scanner' "$side")" = "ix500" ]
+  [ "$(jq -r '.followups.check_report.status' "$side")" = "done" ]
+  report="$OUT/$PAY_DIR_REL/checks20260605-report.txt"
+  grep -q '\$2,334.56' "$report"
+  grep -q '1001' "$report"   # 1001 is the unsigned one
+  [ "$(index_lines | wc -l | tr -d ' ')" = "2" ]
 }
 
 @test "second batch appends paychecks without re-normalizing filed pages" {
   page page-001.jpg "CHECK 1001" 1200x500
   page page-002.jpg "BACK 1001" 1200x500
-  cat > "$STAGING/manifest.json" <<'EOF'
-{
-  "batch": "batch-20260611-120000",
-  "documents": [
-    { "type": "paycheck",
-      "pages": [ { "file": "pages/page-001.jpg", "rotate": 0 },
-                 { "file": "pages/page-002.jpg", "rotate": 0 } ],
-      "fields": { "check_number": 1001, "paydate": "20260605" } }
-  ]
-}
-EOF
-  mkdir -p "$TMP/bin"
-  cat > "$TMP/bin/checks-normalize" <<'EOF'
-#!/usr/bin/env bash
-echo "$@" >> "${NORMALIZE_LOG:?}"
-if [ "$1" = "--page" ]; then cp "$2" "$3"; fi
-EOF
-  chmod +x "$TMP/bin/checks-normalize"
-  export NORMALIZE_LOG="$TMP/normalize.log"
-  run env PATH="$TMP/bin:$BATS_TEST_DIRNAME/../bin:$PATH" NORMALIZE_LOG="$NORMALIZE_LOG" \
-    "$BATCH_FILE" -o "$OUT" --no-text-layer "$STAGING"
+  one_doc '{ "type": "paycheck", "entity": "rio-laundromat",
+             "pages": [ { "file": "pages/page-001.jpg", "rotate": 0 },
+                        { "file": "pages/page-002.jpg", "rotate": 0 } ],
+             "fields": { "check_number": 1001, "paydate": "20260605" } }'
+  stub_normalize
+  run bf_checks "$STAGING"
   [ "$status" -eq 0 ]
+  side="$OUT/$PAY_DIR_REL/checks20260605.json"
+  # No amount/signed read yet, so the report waits.
+  [ "$(jq -r '.followups.check_report.status' "$side")" = "pending" ]
   # Second batch, same paydate.
   S2="$TMP/batch-20260611-130000"
   mkdir -p "$S2/pages"
   cat > "$S2/batch.json" <<'EOF'
-{"batch":"batch-20260611-130000","started":"2026-06-11T13:00:00-0400","resolution":300}
+{"batch":"batch-20260611-130000","started":"2026-06-11T13:00:00-0400","resolution":300,
+ "scanner":"brother","user":"ariel","host":"storemac"}
 EOF
   STAGING="$S2" page page-001.jpg "CHECK 1002" 1200x500
   STAGING="$S2" page page-002.jpg "BACK 1002" 1200x500
@@ -384,146 +409,127 @@ EOF
 {
   "batch": "batch-20260611-130000",
   "documents": [
-    { "type": "paycheck",
+    { "type": "paycheck", "entity": "rio-laundromat",
       "pages": [ { "file": "pages/page-001.jpg", "rotate": 0 },
                  { "file": "pages/page-002.jpg", "rotate": 0 } ],
       "fields": { "check_number": 1002, "paydate": "20260605" } }
   ]
 }
 EOF
-  run env PATH="$TMP/bin:$BATS_TEST_DIRNAME/../bin:$PATH" NORMALIZE_LOG="$NORMALIZE_LOG" \
-    "$BATCH_FILE" -o "$OUT" --no-text-layer "$S2"
+  run bf_checks "$S2"
   [ "$status" -eq 0 ]
-  [ "$(qpdf --show-npages "$OUT/paychecks/checks20260605.pdf")" = "4" ]
+  [ "$(qpdf --show-npages "$OUT/$PAY_DIR_REL/checks20260605.pdf")" = "4" ]
   # Two --page calls per batch, each on that batch's NEW pages only — the
   # already-filed target is never re-rendered (no cumulative JPEG loss).
   [ "$(wc -l < "$NORMALIZE_LOG" | tr -d ' ')" = "4" ]
   [ "$(awk '$1 != "--page"' "$NORMALIZE_LOG" | wc -l | tr -d ' ')" = "0" ]
-  ! grep -q "$OUT/paychecks/checks20260605.pdf" "$NORMALIZE_LOG"
-}
-
-entities_registry() {
-  mkdir -p "$OUT"
-  cat > "$OUT/entities.json" <<'EOF'
-{
-  "entities": [
-    { "slug": "personal",       "name": "Personal",           "kind": "personal" },
-    { "slug": "rio-laundromat", "name": "RIO LAUNDROMAT LLC", "kind": "business" }
-  ]
-}
-EOF
-}
-
-entity_manifest() { # one receipt assigned to rio-laundromat
-  cat > "$STAGING/manifest.json" <<'EOF'
-{
-  "batch": "batch-20260611-120000",
-  "documents": [
-    { "type": "receipt", "name": "receipt-2026-06-08-home-depot $45.23",
-      "entity": "rio-laundromat",
-      "pages": [ { "file": "pages/page-001.jpg", "rotate": 0 } ],
-      "fields": { "vendor": "Home Depot", "date": "2026-06-08", "total": 45.23 } }
-  ]
-}
-EOF
-}
-
-@test "entity files into a per-entity subfolder; sidecar + index carry it" {
-  page page-001.jpg RECEIPT
-  entities_registry
-  entity_manifest
-  run "$BATCH_FILE" -o "$OUT" --no-text-layer "$STAGING"
-  [ "$status" -eq 0 ]
-  pdf="$OUT/receipts/rio-laundromat/receipt-2026-06-08-home-depot \$45.23.pdf"
-  [ -f "$pdf" ]
-  [ "$(jq -r '.entity' "${pdf%.pdf}.json")" = "rio-laundromat" ]
-  [ "$(jq -r '.entity' "$OUT/index.jsonl")" = "rio-laundromat" ]
-  [ "$(jq -r '.file' "$OUT/index.jsonl")" = "receipts/rio-laundromat/receipt-2026-06-08-home-depot \$45.23.pdf" ]
-}
-
-@test "document without entity still files at the type-folder root" {
-  page page-001.jpg RECEIPT
-  page page-002.jpg BLANK
-  entities_registry
-  receipt_manifest
-  run "$BATCH_FILE" -o "$OUT" --no-text-layer "$STAGING"
-  [ "$status" -eq 0 ]
-  [ -f "$OUT/receipts/receipt-2026-06-08-home-depot \$45.23.pdf" ]
-  [ "$(jq -r '.entity' "$OUT/index.jsonl")" = "null" ]
+  ! grep -q "$OUT/$PAY_DIR_REL/checks20260605.pdf" "$NORMALIZE_LOG"
+  [ "$(jq -c '[.checks[].check_number]' "$side")" = "[1001,1002]" ]
+  [ "$(jq -c '[.sources[].user]' "$side")" = '["tester","ariel"]' ]
+  # Each filer's index lines land in its own file.
+  [ "$(ls "$OUT/_index" | wc -l | tr -d ' ')" = "2" ]
 }
 
 @test "unknown entity: exit 1, nothing written" {
   page page-001.jpg RECEIPT
   entities_registry
-  cat > "$STAGING/manifest.json" <<'EOF'
-{
-  "batch": "batch-20260611-120000",
-  "documents": [
-    { "type": "receipt", "name": "receipt-2026-06-08-x $1.00",
-      "entity": "rio-cycle-typo",
-      "pages": [ { "file": "pages/page-001.jpg", "rotate": 0 } ] }
-  ]
-}
-EOF
-  run "$BATCH_FILE" -o "$OUT" --no-text-layer "$STAGING"
+  one_doc '{ "type": "receipt", "name": "receipt-2026-06-08-x $1.00", "entity": "rio-cycle-typo",
+             "fields": { "date": "2026-06-08" },
+             "pages": [ { "file": "pages/page-001.jpg", "rotate": 0 } ] }'
+  run bf "$STAGING"
   [ "$status" -eq 1 ]
   [[ "$output" == *"unknown entity: rio-cycle-typo"* ]]
-  [ ! -d "$OUT/receipts" ]
-  [ ! -e "$OUT/index.jsonl" ]
+  [ ! -d "$OUT/rio-cycle-typo" ]
+  [ ! -d "$OUT/_index" ]
 }
 
 @test "bad entity slug (uppercase): exit 1, even without a registry" {
   page page-001.jpg RECEIPT
-  cat > "$STAGING/manifest.json" <<'EOF'
-{
-  "batch": "batch-20260611-120000",
-  "documents": [
-    { "type": "receipt", "name": "receipt-2026-06-08-x $1.00",
-      "entity": "RIO LAUNDROMAT LLC",
-      "pages": [ { "file": "pages/page-001.jpg", "rotate": 0 } ] }
-  ]
-}
-EOF
-  run "$BATCH_FILE" -o "$OUT" --no-text-layer "$STAGING"
+  one_doc '{ "type": "receipt", "name": "receipt-2026-06-08-x $1.00", "entity": "RIO LAUNDROMAT LLC",
+             "fields": { "date": "2026-06-08" },
+             "pages": [ { "file": "pages/page-001.jpg", "rotate": 0 } ] }'
+  run bf "$STAGING"
   [ "$status" -eq 1 ]
   [ ! -d "$OUT" ]
 }
 
 @test "entity accepted without a registry (slug check only)" {
   page page-001.jpg RECEIPT
-  cat > "$STAGING/manifest.json" <<'EOF'
-{
-  "batch": "batch-20260611-120000",
-  "documents": [
-    { "type": "receipt", "name": "receipt-2026-06-08-x $1.00",
-      "entity": "acme",
-      "pages": [ { "file": "pages/page-001.jpg", "rotate": 0 } ] }
-  ]
-}
-EOF
-  run "$BATCH_FILE" -o "$OUT" --no-text-layer "$STAGING"
+  one_doc '{ "type": "receipt", "name": "receipt-2026-06-08-x $1.00", "entity": "acme",
+             "fields": { "date": "2026-06-08" },
+             "pages": [ { "file": "pages/page-001.jpg", "rotate": 0 } ] }'
+  run bf "$STAGING"
   [ "$status" -eq 0 ]
-  [ -f "$OUT/receipts/acme/receipt-2026-06-08-x \$1.00.pdf" ]
+  [ -f "$OUT/acme/receipts/2026/receipt-2026-06-08-x \$1.00.pdf" ]
 }
 
-@test "tax type files into taxes/" {
+@test "unsafe copies path in the registry: exit 1, nothing written" {
   page page-001.jpg TAX
+  mkdir -p "$OUT"
+  echo '{"entities":[{"slug":"personal","copies":{"tax":"../outside"}}]}' > "$OUT/entities.json"
+  one_doc '{ "type": "tax", "name": "tax-2025-w2-acme", "entity": "personal",
+             "fields": { "tax_year": 2025 },
+             "pages": [ { "file": "pages/page-001.jpg", "rotate": 0 } ] }'
+  run bf "$STAGING"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"copies"* ]]
+  [ ! -d "$OUT/personal" ]
+}
+
+@test "tax files under the tax year and is copied to the entity's Drive Tax folder" {
+  page page-001.jpg W2
+  entities_registry
+  one_doc '{ "type": "tax", "name": "tax-2025-w2-adp", "entity": "rio-laundromat",
+             "fields": { "party": "ADP", "date": "2026-01-28", "tax_year": 2025, "title": "W-2" },
+             "pages": [ { "file": "pages/page-001.jpg", "rotate": 0 } ] }'
+  run bf "$STAGING"
+  [ "$status" -eq 0 ]
+  side="$OUT/rio-laundromat/taxes/2025/tax-2025-w2-adp.json"
+  [ -f "${side%.json}.pdf" ]
+  copy="$DRIVE/8328 De Soto Ave/Tax/2025/Tax Supporting Docs/tax-2025-w2-adp.pdf"
+  [ -f "$copy" ]
+  [ "$(jq -r '.followups.copy.status' "$side")" = "done" ]
+  [ "$(jq -r '.followups.copy.ref' "$side")" = "8328 De Soto Ave/Tax/2025/Tax Supporting Docs/tax-2025-w2-adp.pdf" ]
+  [ "$(jq -r '.copies[0]' "$side")" = "8328 De Soto Ave/Tax/2025/Tax Supporting Docs/tax-2025-w2-adp.pdf" ]
+  [ "$(index_lines | jq -r '.type')" = "tax" ]
+}
+
+@test "existing file in the copy target is never overwritten" {
+  page page-001.jpg LABS
+  entities_registry
+  mkdir -p "$DRIVE/Baruch/Health/MedicalRecords"
+  printf keep > "$DRIVE/Baruch/Health/MedicalRecords/lab-results-quest-2026-06-01.pdf"
+  one_doc '{ "type": "medical", "name": "lab-results-quest-2026-06-01", "entity": "personal",
+             "pages": [ { "file": "pages/page-001.jpg", "rotate": 0 } ] }'
+  run bf "$STAGING"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$DRIVE/Baruch/Health/MedicalRecords/lab-results-quest-2026-06-01.pdf")" = "keep" ]
+  [ -f "$DRIVE/Baruch/Health/MedicalRecords/lab-results-quest-2026-06-01-2.pdf" ]
+}
+
+@test "follow-ups: QuickBooks only for entities that keep books there; calendar on a due date" {
+  page page-001.jpg INV1
+  page page-002.jpg INV2
   entities_registry
   cat > "$STAGING/manifest.json" <<'EOF'
 {
   "batch": "batch-20260611-120000",
   "documents": [
-    { "type": "tax", "name": "tax-2026-04-15-1099-misc",
-      "entity": "personal",
+    { "type": "invoice", "name": "invoice-2026-06-01-ladwp $310.00", "entity": "rio-laundromat",
       "pages": [ { "file": "pages/page-001.jpg", "rotate": 0 } ],
-      "fields": { "party": "IRS", "date": "2026-04-15", "title": "1099-MISC" } }
+      "fields": { "vendor": "LADWP", "date": "2026-06-01", "due_date": "2026-06-21", "amount": 310 } },
+    { "type": "invoice", "name": "invoice-2026-06-02-sce $99.00", "entity": "rio-cycles",
+      "pages": [ { "file": "pages/page-002.jpg", "rotate": 0 } ],
+      "fields": { "vendor": "SCE", "date": "2026-06-02" } }
   ]
 }
 EOF
-  run "$BATCH_FILE" -o "$OUT" --no-text-layer "$STAGING"
+  run bf "$STAGING"
   [ "$status" -eq 0 ]
-  [ -f "$OUT/taxes/personal/tax-2026-04-15-1099-misc.pdf" ]
-  [ "$(jq -r '.type' "$OUT/index.jsonl")" = "tax" ]
+  a="$OUT/rio-laundromat/invoices/2026/invoice-2026-06-01-ladwp \$310.00.json"
+  b="$OUT/rio-cycles/invoices/2026/invoice-2026-06-02-sce \$99.00.json"
+  [ "$(jq -c '.followups | keys' "$a")" = '["calendar","quickbooks"]' ]
+  [ "$(jq -c '.followups | keys' "$b")" = '[]' ]
 }
 
 @test "missing ocrmypdf: prints skip notice, still succeeds" {
@@ -537,5 +543,5 @@ EOF
   run env PATH="$TMP/toolbin:/usr/bin:/bin" "$BATCH_FILE" -o "$OUT" "$STAGING"
   [ "$status" -eq 0 ]
   [[ "$output" == *"skipping searchable text layers"* ]]
-  [ -f "$OUT/receipts/receipt-2026-06-08-home-depot \$45.23.pdf" ]
+  [ -f "$OUT/$RECEIPT_REL.pdf" ]
 }

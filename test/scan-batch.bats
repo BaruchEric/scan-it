@@ -92,3 +92,58 @@ teardown() { rm -rf "$TMP"; }
   [ "$status" -eq 1 ]
   [[ "$output" == *"nothing feeding"* ]]
 }
+
+@test "records scanner, user, host and the profile's default entity in batch.json" {
+  root="$TMP/root"
+  mkdir -p "$root"
+  cat > "$root/profiles.json" <<'JSON'
+{
+  "users": [ { "slug": "ariel", "name": "Ariel", "accounts": ["nobody-matches"] } ],
+  "profiles": [
+    { "user": "ariel", "scanner": "ix500", "default_entity": "rio-laundromat" },
+    { "user": "*", "scanner": "*", "default_entity": "personal" }
+  ]
+}
+JSON
+  echo 2 > "$SCANIMAGE_STUB_DIR/feed"
+  echo yes > "$SCANIMAGE_STUB_DIR/sensor"
+  run env SCAN_ROOT="$root" "$SCAN_BATCH" -o "$BATCHES" --idle 1 --user ariel
+  [ "$status" -eq 0 ]
+  staging=$(echo "$BATCHES"/batch-*)
+  [ "$(jq -r '.scanner' "$staging/batch.json")" = "ix500" ]
+  [ "$(jq -r '.user' "$staging/batch.json")" = "ariel" ]
+  [ "$(jq -r '.host' "$staging/batch.json")" = "$(hostname -s)" ]
+  [ "$(jq -r '.default_entity' "$staging/batch.json")" = "rio-laundromat" ]
+}
+
+@test "user comes from a profiles.json account match; wildcard profile supplies the entity" {
+  root="$TMP/root"
+  mkdir -p "$root"
+  cat > "$root/profiles.json" <<JSON
+{
+  "users": [ { "slug": "elsa", "accounts": ["$USER"] } ],
+  "profiles": [ { "user": "*", "scanner": "*", "default_entity": "personal" } ]
+}
+JSON
+  echo 2 > "$SCANIMAGE_STUB_DIR/feed"
+  echo yes > "$SCANIMAGE_STUB_DIR/sensor"
+  run env -u SCAN_USER SCAN_ROOT="$root" "$SCAN_BATCH" -o "$BATCHES" --idle 1
+  [ "$status" -eq 0 ]
+  staging=$(echo "$BATCHES"/batch-*)
+  [ "$(jq -r '.user' "$staging/batch.json")" = "elsa" ]
+  [ "$(jq -r '.default_entity' "$staging/batch.json")" = "personal" ]
+}
+
+@test "staging defaults to SCAN_STAGING, never the Drive filing root" {
+  echo 2 > "$SCANIMAGE_STUB_DIR/feed"
+  echo yes > "$SCANIMAGE_STUB_DIR/sensor"
+  run env SCAN_STAGING="$TMP/local" SCAN_ROOT="$TMP/drive" "$SCAN_BATCH" --idle 1
+  [ "$status" -eq 0 ]
+  [ -d "$(echo "$TMP"/local/batch-*)" ]
+  [ ! -e "$TMP/drive" ]
+}
+
+@test "rejects a non-slug --user" {
+  run "$SCAN_BATCH" -o "$BATCHES" --idle 1 --user "Ariel B"
+  [ "$status" -eq 64 ]
+}

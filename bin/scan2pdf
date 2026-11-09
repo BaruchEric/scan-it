@@ -12,13 +12,15 @@ usage() {
   cat <<'EOF'
 Usage: scan2pdf [options] [output-name]
 
-Drop a stack in the ADF, run this, get a dated PDF in ~/Documents/Scans.
+Drop a stack in the ADF, run this, get a dated PDF in the filing root's
+_inbox folder (raw, unfiled; the batch flow is scan-batch + batch-file).
 
 Options:
   -s, --simplex        front side only (default: duplex)
   -g, --gray           grayscale (default: color)
   -r, --resolution N   dpi (default: 300)
-  -o, --outdir DIR     output directory (default: ~/Documents/Scans)
+  -o, --outdir DIR     output directory (default: $SCAN_ROOT/_inbox, where
+                       SCAN_ROOT defaults to ~/My Drive/scans)
       --scanner WHICH  brother | ix500 | auto (default: auto — Brother first;
                        env SCAN_SCANNER sets the default)
   -p, --png            iX500 only: lossless PNG intermediates — PDFs ~20x bigger
@@ -36,7 +38,7 @@ EOF
 source_opt="ADF Duplex"
 mode="Color"
 resolution=300
-outdir="$HOME/Documents/Scans"
+outdir="${SCAN_ROOT:-$HOME/My Drive/scans}/_inbox"
 img_format="jpeg"
 img_ext="jpg"
 keep_pages=0

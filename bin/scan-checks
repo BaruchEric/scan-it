@@ -5,7 +5,7 @@
 # Part of the ix500-scan project (~/Arik/dev/office/scan-it). Wraps scan2pdf.
 set -euo pipefail
 
-default_outdir="$HOME/Documents/Scans/paychecks"
+default_outdir="${SCAN_ROOT:-$HOME/My Drive/scans}/_inbox/paychecks"
 
 usage() {
   cat <<EOF
