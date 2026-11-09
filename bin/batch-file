@@ -11,8 +11,10 @@
 # Sidecars record who scanned it on which scanner (from batch.json) and the
 # follow-up workflows the document needs. Entities that map a type to a Drive
 # folder in entities.json ("copies") also get a copy there (tax returns to the
-# property's Tax/<year> folder, medical records to MedicalRecords). Paychecks
-# route through checks-split, which normalizes each check.
+# property's Tax/<year> folder, medical records to MedicalRecords). Every
+# document of an entity with "quickbooks": true gets a quickbooks follow-up,
+# whatever its type, so each one is attached to its payment or marked skipped.
+# Paychecks route through checks-split, which normalizes each check.
 #
 # Part of the scan-it project (~/dev/office/scan-it).
 set -euo pipefail
@@ -384,8 +386,7 @@ file_document() { # <doc-json>
             {copy: {status: "failed", note: ($copied | ltrimstr("!")), updated: $filed, ref: null}}
           else {copy: {status: "done", note: (if $note == "" then null else $note end),
                        updated: $filed, ref: $copied}} end)
-         + (if ($doc.type | IN("receipt","invoice")) and ($ent.quickbooks // false)
-            then {quickbooks: pending} else {} end)
+         + (if ($ent.quickbooks // false) then {quickbooks: pending} else {} end)
          + (if ($doc.fields.due_date // null | iso) != null then {calendar: pending} else {} end)
          + (if $doc.type == "medical" then {vault: pending} else {} end))}' \
     --argjson doc "$doc" --argjson src "$source_json" --argjson reg "$registry_json" \

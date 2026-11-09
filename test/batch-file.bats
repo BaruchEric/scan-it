@@ -640,6 +640,50 @@ EOF
   [ "$(jq -c '.followups | keys' "$b")" = '[]' ]
 }
 
+@test "follow-ups: QuickBooks for every document type of an entity that keeps books there" {
+  page page-001.jpg POLICY
+  page page-002.jpg STATEMENT
+  page page-003.jpg TAXBILL
+  page page-004.jpg LETTER
+  page page-005.jpg OTHERLLC
+  page page-006.jpg HOME
+  entities_registry
+  cat > "$STAGING/manifest.json" <<'EOF'
+{
+  "batch": "batch-20260611-120000",
+  "documents": [
+    { "type": "contract", "name": "contract-2026-03-18-three-business-policy", "entity": "rio-laundromat",
+      "pages": [ { "file": "pages/page-001.jpg", "rotate": 0 } ],
+      "fields": { "party": "THREE", "date": "2026-03-18" } },
+    { "type": "statement", "name": "statement-merchant-services-2026-05 $120.00", "entity": "rio-laundromat",
+      "pages": [ { "file": "pages/page-002.jpg", "rotate": 0 } ],
+      "fields": { "issuer": "Merchant Services", "date": "2026-05-31" } },
+    { "type": "tax", "name": "tax-2026-unsecured-property-tax-la-county", "entity": "rio-laundromat",
+      "pages": [ { "file": "pages/page-003.jpg", "rotate": 0 } ],
+      "fields": { "form": "unsecured property tax bill", "tax_year": 2026 } },
+    { "type": "letter", "name": "letter-city-of-la-notice-2026-06-01", "entity": "rio-laundromat",
+      "pages": [ { "file": "pages/page-004.jpg", "rotate": 0 } ],
+      "fields": { "sender": "City of LA" } },
+    { "type": "contract", "name": "contract-2026-04-01-acme-service", "entity": "rio-cycles",
+      "pages": [ { "file": "pages/page-005.jpg", "rotate": 0 } ],
+      "fields": { "party": "Acme", "date": "2026-04-01" } },
+    { "type": "letter", "name": "letter-dmv-notice-2026-06-02", "entity": "personal",
+      "pages": [ { "file": "pages/page-006.jpg", "rotate": 0 } ],
+      "fields": { "sender": "DMV" } }
+  ]
+}
+EOF
+  run bf --drive-root "$DRIVE" "$STAGING"
+  [ "$status" -eq 0 ]
+  r="$OUT/rio-laundromat"
+  [ "$(jq -r '.followups.quickbooks.status' "$r/contracts/contract-2026-03-18-three-business-policy.json")" = "pending" ]
+  [ "$(jq -r '.followups.quickbooks.status' "$r/statements/2026/statement-merchant-services-2026-05 \$120.00.json")" = "pending" ]
+  [ "$(jq -c '.followups | keys' "$r/taxes/2026/tax-2026-unsecured-property-tax-la-county.json")" = '["copy","quickbooks"]' ]
+  [ "$(jq -r '.followups.quickbooks.status' "$r/letters/letter-city-of-la-notice-2026-06-01.json")" = "pending" ]
+  [ "$(jq -c '.followups | keys' "$OUT/rio-cycles/contracts/contract-2026-04-01-acme-service.json")" = '[]' ]
+  [ "$(jq -c '.followups | keys' "$OUT/personal/letters/letter-dmv-notice-2026-06-02.json")" = '[]' ]
+}
+
 @test "missing ocrmypdf: prints skip notice, still succeeds" {
   page page-001.jpg RECEIPT
   page page-002.jpg BLANK

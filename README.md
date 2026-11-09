@@ -9,7 +9,7 @@ Open-source ScanSnap iX500 document-scanning stack for macOS: SANE-driven bash C
 - **Stack:** bash · SANE/sane-backends · img2pdf + qpdf · ImageMagick + poppler · jq · optional ocrmypdf · NAPS2 (GUI). No build step. bun runs the live dashboard; its `package.json` only holds dev tooling and task shortcuts.
 - **Install:** symlink `bin/*` onto your `PATH` (they already live in `~/bin` on this machine).
 - **Run it:** `scan-batch` scans a mixed stack into local staging; Claude classifies each sheet and writes a manifest; `batch-file` files every document into the Google Drive filing root `~/My Drive/scans/<entity>/<type>/[<YYYY>/]`.
-- **Read side:** `scan-catalog` merges the sidecars into a catalog, lists open follow-ups (Drive copies, QuickBooks drafts, calendar reminders, medical records), and renders the HTML dashboards.
+- **Read side:** `scan-catalog` merges the sidecars into a catalog, lists open follow-ups (Drive copies, QuickBooks attachments, reminders, medical records), and renders the HTML dashboards.
 - **Live dashboard:** `scan-catalog serve` runs a local server on http://127.0.0.1:7820/ with scanner status, batches in progress, and buttons that run the tools (scan, stop, resume, file, diagnose, restart the Brother services).
 - **Run and deploy:** `bun run dev` serves the dashboard with mock scanners on http://127.0.0.1:7830/ and restarts on edits; `bun run deploy` puts this checkout live at https://scans.beric.ca and on the tailnet. See "Run locally and deploy".
 - **Diagnose:** `scan-diag` runs every dependency check and prints pass/fail with a fix hint per failure.

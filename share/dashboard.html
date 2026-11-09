@@ -641,8 +641,8 @@ details.checks li { display: grid; grid-template-columns: 4.5em minmax(0, 1fr) a
   function typeOf(k) { return TYPE[k] || TYPE.misc; }
 
   var WORKFLOWS = [
-    { key: 'quickbooks',   title: 'QuickBooks drafts',  what: 'Business receipts and invoices to draft in QuickBooks.', short: 'QuickBooks' },
-    { key: 'calendar',     title: 'Calendar reminders', what: 'Due dates that still need a Google Calendar reminder.', short: 'Calendar' },
+    { key: 'quickbooks',   title: 'QuickBooks',         what: 'Documents of a business that keeps its books in QuickBooks. Each one gets attached to its payment there, or drafted when there is none.', short: 'QuickBooks' },
+    { key: 'calendar',     title: 'Reminders',          what: 'Due dates that still need a reminder: Rio Compliance for a business, Google Calendar for personal papers.', short: 'Reminder' },
     { key: 'copy',         title: 'Drive folder copies', what: "Tax and medical PDFs copied into their Drive folder (the property's Tax folder, MedicalRecords). Listed here only when a copy failed.", short: 'Drive copy' },
     { key: 'vault',        title: 'Medical record notes', what: 'Medical documents that need a note in the vault.', short: 'Vault note' },
     { key: 'check_report', title: 'Paycheck reports',   what: 'Pay runs that still need their check report.', short: 'Check report' }
