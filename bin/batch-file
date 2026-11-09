@@ -504,7 +504,7 @@ if (( npay > 0 )); then
         | .sources += [$src] | .filed = $filed' "$side" > "$side.tmp" && mv "$side.tmp" "$side"
       report=$(paydate_report "$side" "$dir" "$d")
       if [[ -n "$report" ]]; then
-        status=done note=null
+        status="done" note=null
         echo "    report: $entity/paychecks/${d:0:4}/$report"
       else
         status=pending note='"needs amount and signed y/n on every check"'

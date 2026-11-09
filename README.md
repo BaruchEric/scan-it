@@ -19,7 +19,7 @@ Open-source ScanSnap iX500 document-scanning stack for macOS: SANE-driven bash C
 
 ```
 Brother ADS-4300N ──USB──> pve (192.168.1.12): ipp-usb, eSCL on localhost:60000 (loopback only)
-   ──ssh -L (scan-it-escl.service)──> CT 150 scan-it (192.168.1.71, DHCP): localhost:60000
+   ──ssh -L (scan-it-escl.service)──> CT 150 scan-it (192.168.1.71, Orbi reservation): localhost:60000
 CT 150: scan-it-dashboard (127.0.0.1:7820 main, :7821 edge), user eric, ~/scan-it
    ──ssh -R (scan-it-tunnel)──> mini 127.0.0.1:7822 <── tailscale serve :8445
                                mini 127.0.0.1:7823 <── beric-mini Cloudflare tunnel <── scans.beric.ca
