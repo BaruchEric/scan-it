@@ -28,6 +28,18 @@ SH
   mkdir -p "$SCANIMAGE_STUB_DIR"
   export SCAN_BATCH_SCANIMAGE="$BATS_TEST_DIRNAME/stubs/scanimage"
 
+  # Stands in for the Brother restart so tests never kill the real services.
+  # It fails when $TMP/restart-fail exists.
+  cat > "$TMP/restart" <<SH
+#!/bin/sh
+echo "Stopping the Brother services."
+sleep 2
+if [ -f "$TMP/restart-fail" ]; then echo "NETserver did not come back."; exit 1; fi
+echo "All three Brother services are running."
+SH
+  chmod +x "$TMP/restart"
+  export SCAN_BROTHER_RESTART="$TMP/restart"
+
   cat > "$TMP/tpl.html" <<'HTML'
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; img-src data:">
 <script id="catalog" type="application/json">
@@ -169,6 +181,51 @@ post() { # <path> [json]
   [ "$st" != "running" ]
   curl -fs "$URL/api/jobs/$job" | jq -r .output | grep -q "scan-diag"
   ls "$STAGING/.logs/"*"-$job-diag.log"
+}
+
+wait_job() { # <job id>; prints the finished job's JSON
+  local j
+  for _ in $(seq 1 100); do
+    j=$(curl -fs "$URL/api/jobs/$1")
+    [ "$(jq -r .state <<<"$j")" != "running" ] && break
+    sleep 0.1
+  done
+  echo "$j"
+}
+
+@test "a Brother restart shows on its card and blocks a second restart and Diagnose" {
+  run post /api/brother/restart
+  [ "${lines[1]}" = "200" ]
+  job=$(jq -r .job <<<"${lines[0]}")
+  st=$(curl -fs "$URL/api/status")
+  [ "$(jq -r '.scanners[] | select(.slug=="brother") | .state' <<<"$st")" = "restarting" ]
+  [ "$(jq -c '.scanners[] | select(.slug=="brother") | .actions' <<<"$st")" = "[]" ]
+  [ "$(jq -r '.scanners[] | select(.slug=="ix500") | .state' <<<"$st")" != "restarting" ]
+  [ "$(jq -r '.scanners[] | select(.slug=="ix500") | .actions | index("diag")' <<<"$st")" = "null" ]
+  run post /api/brother/restart
+  [ "${lines[1]}" = "409" ]
+  [[ "${lines[0]}" == *"already restarting ($job)"* ]]
+  run post /api/diag
+  [ "${lines[1]}" = "409" ]
+  [[ "${lines[0]}" == *"restarting"* ]]
+
+  j=$(wait_job "$job")
+  [ "$(jq -r .state <<<"$j")" = "done" ]
+  [ "$(jq -r .summary <<<"$j")" = "All three Brother services are running." ]
+  st=$(curl -fs "$URL/api/status")
+  [ "$(jq -r '.scanners[] | select(.slug=="brother") | .state' <<<"$st")" = "idle" ]
+  run post /api/brother/restart
+  [ "${lines[1]}" = "200" ]
+}
+
+@test "a failed job carries its last output line as the summary" {
+  touch "$TMP/restart-fail"
+  run post /api/brother/restart
+  [ "${lines[1]}" = "200" ]
+  j=$(wait_job "$(jq -r .job <<<"${lines[0]}")")
+  [ "$(jq -r .state <<<"$j")" = "failed" ]
+  [ "$(jq -r .exit_code <<<"$j")" = "1" ]
+  [ "$(jq -r .summary <<<"$j")" = "NETserver did not come back." ]
 }
 
 @test "scan-catalog serve opens an already running server instead of starting a second" {

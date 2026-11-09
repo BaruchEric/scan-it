@@ -165,7 +165,7 @@ paper → scanimage (SANE) → page images → img2pdf/qpdf → PDF
 
 - `GET /api/status`: scanners (eSCL `ScannerStatus` via `escl-scan --status` and `pgrep` of the Brother services; `scanimage -L` and `-A` for the iX500; `ioreg` for USB presence; cached 5 s, skipped for a scanner mid-batch), staged batches with their state and allowed actions, and jobs.
 - Batch state comes from the staging dir: a live `.pid` means scanning (`.stop` present: stopping), else `.filed` means filed, else `manifest.json` means ready, else staged.
-- `POST /api/scan`, `/api/batches/<id>/{stop,resume,file,discard,reveal}`, `/api/diag`, `/api/brother/restart`, `/api/dashboard/refresh` start the matching tool as a detached job. The server checks each action against the batch state first. Discard moves the staging dir to `~/.Trash`.
+- `POST /api/scan`, `/api/batches/<id>/{stop,resume,file,discard,reveal}`, `/api/diag`, `/api/brother/restart`, `/api/dashboard/refresh` start the matching tool as a detached job. The server checks each action against the batch state first, and allows one Brother restart at a time (Diagnose waits for it too). Discard moves the staging dir to `~/.Trash`.
 - `GET /files/<path>` serves PDFs from the filing root only; `GET /api/batches/<id>/thumb/<n>` serves a `sips` thumbnail.
 - Local only: it binds 127.0.0.1, refuses other Host headers (DNS rebinding) and cross-origin POSTs, and every POST must carry the per-launch token the page embeds.
 
@@ -186,4 +186,4 @@ TROUBLESHOOTING.md          # failure modes and fixes
 
 ## Status
 
-In active use for document, paycheck, and mixed-batch scanning. The check workflow (scan → manifest → split → normalize → report) and the mixed-batch workflow (`scan-batch` + `batch-file`) both shipped 2026-06-11; per-check normalization inside `checks-split` and the entity registry landed 2026-06-12. Dev-only `bats` suites cover `batch-file`, `scan-batch`, `checks-normalize`, `scan-catalog` and the live server (66 tests). Run them with `bats test/`. macOS + iX500 specific; validated on the single machine recorded in `ENVIRONMENT.md`.
+In active use for document, paycheck, and mixed-batch scanning. The check workflow (scan → manifest → split → normalize → report) and the mixed-batch workflow (`scan-batch` + `batch-file`) both shipped 2026-06-11; per-check normalization inside `checks-split` and the entity registry landed 2026-06-12. Dev-only `bats` suites cover `batch-file`, `scan-batch`, `checks-normalize`, `scan-catalog` and the live server (68 tests). Run them with `bats test/`. macOS + iX500 specific; validated on the single machine recorded in `ENVIRONMENT.md`.

@@ -27,7 +27,7 @@ import { join, resolve, sep } from "node:path";
 // ---------- types ----------
 
 type ScannerState =
-  | "idle" | "scanning" | "busy" | "jam" | "cover-open" | "offline" | "error" | "unknown";
+  | "idle" | "scanning" | "restarting" | "busy" | "jam" | "cover-open" | "offline" | "error" | "unknown";
 type BatchState = "scanning" | "stopping" | "staged" | "ready" | "filed";
 type JobKind = "scan" | "resume" | "file" | "diag" | "refresh" | "restart-services";
 type JobState = "running" | "done" | "failed";
@@ -78,6 +78,8 @@ interface Job {
   started: string;
   ended: string | null;
   exit_code: number | null;
+  /** Last line of output once the job ends, so a failure says why. */
+  summary: string | null;
   batch: string | null;
   reload: boolean;
 }
@@ -191,6 +193,8 @@ const tool = (name: string) => join(BIN, name);
 // Same overrides scan-batch honors, so tests can stand in for the hardware.
 const ESCL = process.env.SCAN_BATCH_ESCL ?? tool("escl-scan");
 const SCANIMAGE = process.env.SCAN_BATCH_SCANIMAGE ?? "scanimage";
+// Tests swap the restart for a stub so they never kill the real Brother services.
+const BROTHER_RESTART = process.env.SCAN_BROTHER_RESTART ?? null;
 
 /** batch.json and sidecars write offsets as -0800; Safari's Date wants -08:00. */
 function isoFix(s: unknown): string | null {
@@ -338,6 +342,33 @@ function overlayBusy(list: Scanner[], batches: Batch[]): Scanner[] {
   });
 }
 
+/** The running Brother restart job, if any. */
+function restartJob(jobs: Job[]): Job | undefined {
+  return jobs.find((j) => j.kind === "restart-services" && j.state === "running");
+}
+
+/**
+ * While a restart runs, the Brother card says so and offers nothing to click.
+ * Mid-restart the probe sees NETserver down and would call that an error, and
+ * a second restart would kill the first one's helper processes. Diagnose
+ * checks every scanner, so it waits on all cards.
+ */
+function overlayRestart(list: Scanner[], jobs: Job[]): Scanner[] {
+  const r = restartJob(jobs);
+  if (!r) return list;
+  return list.map((s): Scanner => {
+    if (s.slug !== "brother" || s.state === "scanning") {
+      return { ...s, actions: s.actions.filter((a) => a !== "diag") };
+    }
+    return {
+      ...s,
+      state: "restarting",
+      detail: "Restarting the Brother services. USBserver is back within seconds, NETserver about 30 s later.",
+      actions: [],
+    };
+  });
+}
+
 function batchActions(state: BatchState, pages: number, busy: boolean): string[] {
   if (busy) return ["reveal"];
   switch (state) {
@@ -358,6 +389,15 @@ class RealBackend implements Backend {
   private seq = 0;
   private cache: { at: number; data: Map<string, Scanner> } = { at: 0, data: new Map() };
   private probing: Promise<Map<string, Scanner>> | null = null;
+  // Bumped when a cached probe is known to be wrong (a restart just ended), so
+  // a probe that started before then can't write its stale answer back.
+  private gen = 0;
+
+  private invalidate(): void {
+    this.gen++;
+    this.cache.at = 0;
+    this.probing = null;
+  }
 
   jobs(): Job[] {
     for (const j of this.jobList) {
@@ -388,22 +428,26 @@ class RealBackend implements Backend {
     const log = join(LOGS, `${stamp}-${id}-${kind}.log`);
     const job: RealJob = {
       id, kind, label, state: "running", started: now(), ended: null,
-      exit_code: null, batch, reload, log,
+      exit_code: null, summary: null, batch, reload, log,
     };
     const fd = openSync(log, "a");
     try {
       const child = spawn(cmd[0], cmd.slice(1), {
         cwd: HOME, env: CHILD_ENV, stdio: ["ignore", fd, fd], detached: true,
       });
-      child.on("exit", (code) => {
+      child.on("exit", (code, signal) => {
+        if (signal) appendFileSync(log, `\nStopped by ${signal}.\n`);
         job.exit_code = code;
         job.state = code === 0 ? "done" : "failed";
         job.ended = now();
+        job.summary = tail(cleanOutput(this.readLog(job)), 1)[0] ?? null;
+        if (kind === "restart-services") this.invalidate();
       });
       child.on("error", (e) => {
         appendFileSync(log, `\n${e.message}\n`);
         job.state = "failed";
         job.ended = now();
+        job.summary = e.message;
       });
       child.unref();
     } finally {
@@ -483,9 +527,10 @@ class RealBackend implements Backend {
     const fresh = Date.now() - this.cache.at < 5000;
     if (force || !fresh) {
       if (!this.probing) {
+        const gen = this.gen;
         this.probing = this.probeAll(defs, busy)
-          .then((data) => { this.cache = { at: Date.now(), data }; return data; })
-          .finally(() => { this.probing = null; });
+          .then((data) => { if (gen === this.gen) this.cache = { at: Date.now(), data }; return data; })
+          .finally(() => { if (gen === this.gen) this.probing = null; });
       }
       if (force || this.cache.at === 0) await this.probing;
     }
@@ -506,8 +551,13 @@ class RealBackend implements Backend {
   }
 
   private async probeBrother(d: ScannerDef, ioreg: string): Promise<Scanner> {
-    const ps = await run(["pgrep", "-fl", "Brother/Utilities/Server"], 3000);
-    const services = BROTHER_SERVICES.map((name) => ({ name, running: ps.out.includes(`${name}.app`) }));
+    const ps = await run(["pgrep", "-fl", `${BROTHER_SERVER_DIR}/`], 3000);
+    // Match the executable path at the start of the command, not any process
+    // (a shell, a grep) whose arguments happen to mention it.
+    const procs = ps.out.split("\n").map((l) => l.replace(/^\d+ /, ""));
+    const services = BROTHER_SERVICES.map((name) => ({
+      name, running: procs.some((c) => c.startsWith(`${BROTHER_SERVER_DIR}/${name}.app/`)),
+    }));
     const onUsb = /ADS-?4300|Brother/i.test(ioreg);
     const st = await run([ESCL, "--status"], 9000);
     const m = /State=(\S+) Adf=(\S+) Endpoint=(\S+)/.exec(st.out);
@@ -616,20 +666,29 @@ class RealBackend implements Backend {
   }
 
   restartBrother(): Job {
+    // Patterns are anchored to the executable path. Unanchored, pkill -f also
+    // matched any shell whose arguments named a service, which is how a second
+    // restart click killed the first restart's script.
+    const svc = (names: string) => `'^${BROTHER_SERVER_DIR}/(${names})\\.app/'`;
+    const up = `pgrep -qf ${svc("USBserver")} && pgrep -qf ${svc("NETserver")}`;
     const script = [
-      `pkill -f '${BROTHER_SERVER_DIR}/(LOGINserver|USBserver|NETserver)' || true`,
+      "echo 'Stopping the Brother services.'",
+      `pkill -f ${svc("LOGINserver|USBserver|NETserver")} || true`,
       "sleep 1",
+      "echo 'Starting LOGINserver. It starts USBserver at once and NETserver about 30 s later.'",
       `open '${BROTHER_SERVER_DIR}/LOGINserver.app'`,
-      // LOGINserver starts USBserver at once and NETserver about 20 s later.
-      "for _ in $(seq 1 40); do",
-      `  pgrep -qf '${BROTHER_SERVER_DIR}/USBserver' && pgrep -qf '${BROTHER_SERVER_DIR}/NETserver' && break`,
+      "for _ in $(seq 1 60); do",
+      `  ${up} && break`,
       "  sleep 1",
       "done",
-      `echo 'Brother services now running:'`,
-      `pgrep -fl 'Brother/Utilities/Server' | sed -E 's#.*/([A-Za-z]+server)\\.app.*#  \\1#' | sort -u`,
+      "echo 'Running now:'",
+      `pgrep -fl '${BROTHER_SERVER_DIR}/' | sed -nE 's#^[0-9]+ ${BROTHER_SERVER_DIR}/(LOGINserver|USBserver|NETserver)\\.app/.*#  \\1#p' | sort -u`,
+      `if ${up}; then echo 'All three Brother services are running.'; else`,
+      "  echo 'USBserver or NETserver did not come back within 60 s. Log out and back in, then run Diagnose.'; exit 1; fi",
     ].join("\n");
-    this.cache.at = 0;
-    return this.start("restart-services", "Restart Brother services", ["/bin/bash", "-c", script]);
+    this.invalidate();
+    const cmd = BROTHER_RESTART ? [BROTHER_RESTART] : ["/bin/bash", "-c", script];
+    return this.start("restart-services", "Restart Brother services", cmd);
   }
 
   refresh(): Job {
@@ -741,6 +800,7 @@ class MockBackend implements Backend {
         j.state = j.willFail ? "failed" : "done";
         j.exit_code = j.willFail ? 1 : 0;
         j.ended = now();
+        j.summary = this.shown(j).at(-1) ?? null;
         j.onDone?.();
       }
     }
@@ -750,7 +810,7 @@ class MockBackend implements Backend {
               extra: Partial<MockJob> = {}): Job {
     const job: MockJob = {
       id: `j${++this.seq}`, kind, label, state: "running", started: now(), ended: null,
-      exit_code: null, batch: null, reload: false, lines, duration, startedMs: Date.now(),
+      exit_code: null, summary: null, batch: null, reload: false, lines, duration, startedMs: Date.now(),
       willFail: false, ...extra,
     };
     this.jobList.unshift(job);
@@ -906,8 +966,11 @@ class MockBackend implements Backend {
 
   restartBrother(): Job {
     return this.add("restart-services", "Restart Brother services", [
-      "Brother services now running:", "  LOGINserver", "  NETserver", "  USBserver",
-    ], 5000);
+      "Stopping the Brother services.",
+      "Starting LOGINserver. It starts USBserver at once and NETserver about 30 s later.",
+      "Running now:", "  LOGINserver", "  NETserver", "  USBserver",
+      "All three Brother services are running.",
+    ], 8000);
   }
 
   refresh(): Job {
@@ -1019,8 +1082,9 @@ function requireAction(b: Batch, action: string, why: string): void {
 
 async function status(force = false) {
   const batches = backend.batches();
-  const scanners = await backend.scanners(scannerDefs(), batches, force);
-  return { now: now(), mock: OPTS.mock, scanners, batches, jobs: backend.jobs() };
+  const probed = await backend.scanners(scannerDefs(), batches, force);
+  const jobs = backend.jobs();
+  return { now: now(), mock: OPTS.mock, scanners: overlayRestart(probed, jobs), batches, jobs };
 }
 
 async function handle(req: Request): Promise<Response> {
@@ -1114,11 +1178,15 @@ async function handle(req: Request): Promise<Response> {
       case "diag": {
         const scanning = backend.batches().find((x) => x.state === "scanning" || x.state === "stopping");
         if (scanning) throw new HttpError(409, `${scanning.id} is scanning. Run Diagnose after it ends.`);
+        const r = restartJob(backend.jobs());
+        if (r) throw new HttpError(409, `The Brother services are restarting (${r.id}). Run Diagnose when that job finishes.`);
         return json({ job: backend.diag().id });
       }
       case "brother/restart": {
         const busy = backend.batches().find((x) => x.scanner === "brother" && (x.state === "scanning" || x.state === "stopping"));
         if (busy) throw new HttpError(409, `The Brother is scanning ${busy.id}. Stop it first.`);
+        const r = restartJob(backend.jobs());
+        if (r) throw new HttpError(409, `The Brother services are already restarting (${r.id}). It takes about 30 s.`);
         return json({ job: backend.restartBrother().id });
       }
       case "dashboard/refresh": return json({ job: backend.refresh().id });

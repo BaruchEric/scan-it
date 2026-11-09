@@ -426,6 +426,7 @@ details.checks li { display: grid; grid-template-columns: 4.5em minmax(0, 1fr) a
 .job-row .ic { margin-top: 3px; }
 .job-l { font-size: 14px; overflow-wrap: anywhere; }
 .job-t { display: block; font-size: 12.5px; color: var(--ink-2); }
+.job-why { display: block; font-size: 12.5px; color: var(--ink-2); overflow-wrap: anywhere; }
 .linkbtn { all: unset; cursor: pointer; font-size: 13px; color: var(--ink-2); text-decoration: underline; text-decoration-color: var(--axis); text-underline-offset: 3px; white-space: nowrap; }
 .linkbtn:hover { color: var(--ink); text-decoration-color: currentColor; }
 .linkbtn:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 3px; }
@@ -1863,7 +1864,7 @@ details.checks li { display: grid; grid-template-columns: 4.5em minmax(0, 1fr) a
   }
 
   var SCANNER_STATE = {
-    idle: ['good', 'done', 'Idle'], scanning: ['run', 'run', 'Scanning'], busy: ['warn', 'unsigned', 'Busy'],
+    idle: ['good', 'done', 'Idle'], scanning: ['run', 'run', 'Scanning'], restarting: ['run', 'run', 'Restarting'], busy: ['warn', 'unsigned', 'Busy'],
     jam: ['crit', 'failed', 'Paper jam'], 'cover-open': ['warn', 'unsigned', 'Cover open'],
     offline: ['muted', 'skipped', 'Offline'], error: ['crit', 'failed', 'Error'], unknown: ['muted', 'skipped', 'Unknown']
   };
@@ -2035,8 +2036,10 @@ details.checks li { display: grid; grid-template-columns: 4.5em minmax(0, 1fr) a
     v.startBtn.disabled = v.scanBtn.disabled;
     v.diagBtn.disabled = frozen || !allowed(s, 'diag') || !!live.busy.diag;
     var canRestart = allowed(s, 'restart-services');
-    v.restartBtn.hidden = !canRestart;
+    var restarting = s.state === 'restarting';
+    v.restartBtn.hidden = !canRestart && !restarting;
     v.restartBtn.disabled = frozen || !canRestart || !!live.busy.restart;
+    v.restartBtn.textContent = restarting ? 'Restarting…' : 'Restart Brother services';
     if (!allowed(s, 'scan') && !v.form.hidden) {
       v.form.hidden = true;
       v.scanBtn.setAttribute('aria-expanded', 'false');
@@ -2210,7 +2213,8 @@ details.checks li { display: grid; grid-template-columns: 4.5em minmax(0, 1fr) a
     var kind = j.state === 'running' ? 'run' : j.state === 'failed' ? 'failed' : 'done';
     refill(v.row, 
       icon(kind, j.state === 'running' ? 'Running' : j.state === 'failed' ? 'Failed' : 'Done'),
-      H('div', null, H('span', { class: 'job-l', text: j.label || j.kind || j.id }), H('span', { class: 'job-t' }, jobTime(j))),
+      H('div', null, H('span', { class: 'job-l', text: j.label || j.kind || j.id }), H('span', { class: 'job-t' }, jobTime(j)),
+        j.state === 'failed' && j.summary ? H('span', { class: 'job-why', text: String(j.summary) }) : null),
       v.toggle);
     v.toggle.setAttribute('aria-label', (v.open ? 'Hide output of ' : 'Show output of ') + (j.label || j.id));
     if (v.open && (j.state === 'running' || v.lastState !== j.state)) loadOutput(v);
