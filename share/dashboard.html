@@ -7,6 +7,7 @@
 <meta name="referrer" content="no-referrer">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'">
 <title>Scans</title>
+<link rel="icon" href="data:,">
 <!--
   scan-it dashboard template. scan-catalog dashboard injects the catalog JSON
   into the script#catalog block below and writes the result next to the PDFs.
@@ -325,6 +326,123 @@ details.checks li { display: grid; grid-template-columns: 4.5em minmax(0, 1fr) a
 .tip-k { width: 12px; height: 2px; border-radius: 1px; }
 .tip-p { color: var(--ink-2); overflow-wrap: anywhere; }
 
+/* Scanner desk: live status and actions when scan-catalog serve hosts the page,
+   a slim scanner list with a pointer to the live page otherwise. */
+.desk { margin: 0 0 28px; }
+.desk-h { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 14px; margin: 0 4px 14px; }
+.desk-h h2 { margin: 0; font: 600 26px/1.15 var(--cond); font-stretch: condensed; }
+.pulse { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; color: var(--ink-2); }
+.pulse i { width: 8px; height: 8px; border-radius: 50%; background: var(--good); flex: none; }
+.pulse.frozen i { background: var(--muted); }
+.tag { font-size: 12px; line-height: 20px; padding: 0 9px; border-radius: 999px; border: 1px dashed var(--ink-2); color: var(--ink); white-space: nowrap; }
+.desk-h .tools { margin-left: auto; display: flex; flex-wrap: wrap; gap: 8px; }
+.banner { margin: 0 0 14px; padding: 10px 14px; border-radius: 8px; background: var(--paper); border: 1px solid var(--edge); box-shadow: inset 3px 0 0 var(--warn); font-size: 14px; }
+.devs { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 310px), 1fr)); gap: 14px; align-items: start; }
+.dev, .jobs, .batches { background: var(--paper); border: 1px solid var(--edge); border-radius: 12px; min-width: 0; }
+.dev { padding: 16px 18px 18px 22px; box-shadow: inset 4px 0 0 var(--tone, var(--axis)); }
+.dev.t-good { --tone: var(--good); } .dev.t-warn { --tone: var(--warn); } .dev.t-crit { --tone: var(--crit); }
+.dev.t-run { --tone: var(--ink-2); } .dev.t-muted { --tone: var(--axis); }
+.dev-h { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.dev-model { margin: 0; font: 600 21px/1.2 var(--cond); font-stretch: condensed; overflow-wrap: anywhere; }
+.dev-where { margin: 1px 0 0; font-size: 13px; color: var(--muted); }
+.pill { display: inline-flex; align-items: center; gap: 6px; flex: none; padding: 2px 10px 2px 5px; border-radius: 999px; background: var(--wash); color: var(--ink); font-size: 13px; font-weight: 600; white-space: nowrap; }
+.pill.run .ic { animation: breathe 1.6s ease-in-out infinite; }
+@keyframes breathe { 50% { opacity: .3; } }
+.dev-detail { margin: 10px 0 0; font-size: 15px; }
+.facts { display: flex; flex-wrap: wrap; gap: 2px 18px; margin: 8px 0 0; font-size: 13px; }
+.facts div { display: flex; gap: 5px; }
+.facts dt { color: var(--muted); }
+.facts dd { margin: 0; color: var(--ink); }
+.chips { list-style: none; padding: 0; margin: 10px 0 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.chips li { display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px; padding: 1px 9px 1px 4px; border-radius: 999px; border: 1px solid var(--edge); color: var(--ink-2); }
+.chips .ic { width: 13px; height: 13px; }
+.dev-batch { margin: 10px 0 0; font-size: 14px; }
+.acts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.act {
+  border: 1px solid var(--edge); background: var(--paper); color: var(--ink);
+  border-radius: 8px; padding: 6px 13px; font-size: 14px; font-weight: 500; cursor: pointer; line-height: 1.3;
+}
+.act:hover:not(:disabled) { background: var(--tab-hover); }
+.act.primary { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+.act.primary:hover:not(:disabled) { background: var(--ink-2); border-color: var(--ink-2); }
+.act.danger { border-color: var(--crit); box-shadow: inset 0 0 0 1px var(--crit); }
+.act:disabled { opacity: .42; cursor: not-allowed; }
+.act[aria-busy="true"] { cursor: progress; }
+.err, .msg { margin: 10px 0 0; font-size: 13.5px; display: flex; gap: 7px; align-items: flex-start; overflow-wrap: anywhere; }
+.err .ic { margin-top: 2px; }
+.msg { color: var(--ink-2); }
+.scanform { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--rule); display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 14px; align-items: end; }
+.scanform .f { display: grid; gap: 4px; font-size: 13px; color: var(--ink-2); min-width: 0; }
+.scanform select, .copybox input {
+  padding: 6px 28px 6px 10px; border-radius: 8px; border: 1px solid var(--edge); background: var(--paper); color: var(--ink);
+  width: 100%; min-width: 0; appearance: none; -webkit-appearance: none;
+  background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%), linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+  background-position: right 13px top 50%, right 8px top 50%; background-size: 5px 5px; background-repeat: no-repeat;
+}
+.copybox input { background-image: none; padding-right: 10px; font-size: 13px; }
+.chk { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--ink); min-height: 34px; }
+.chk input { width: 16px; height: 16px; accent-color: var(--ink); margin: 0; }
+.seg { justify-self: start; display: inline-flex; border: 1px solid var(--edge); border-radius: 8px; padding: 2px; gap: 2px; margin: 0; min-width: 0; }
+.seg legend { padding: 0; }
+.seg label { position: relative; }
+.seg input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; }
+.seg span { display: block; padding: 4px 12px; border-radius: 6px; font-size: 14px; color: var(--ink-2); }
+.seg input:checked + span { background: var(--ink); color: var(--paper); }
+.seg input:focus-visible + span { outline: 2px solid var(--focus); outline-offset: 1px; }
+.scanform .acts { grid-column: 1 / -1; margin-top: 0; }
+.batches { margin-top: 14px; padding: 4px 20px 6px; }
+.batches-h { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 12px 0 8px; }
+.batches-h h3 { margin: 0; font-size: 16px; font-weight: 600; }
+.batches-h span { font-size: 13px; color: var(--ink-2); }
+.blist { list-style: none; margin: 0; padding: 0; }
+.batch { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px 28px; padding: 16px 0 18px; border-top: 1px solid var(--rule); scroll-margin-top: 16px; }
+.b-top { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px; }
+.b-id { font-weight: 600; overflow-wrap: anywhere; }
+.b-meta { display: flex; flex-wrap: wrap; gap: 2px 14px; margin: 6px 0 0; font-size: 13px; color: var(--ink-2); }
+.b-next { margin: 8px 0 0; font-size: 14px; max-width: 64ch; }
+.b-warn { display: flex; gap: 7px; align-items: flex-start; margin: 8px 0 0; font-size: 14px; max-width: 64ch; }
+.b-warn .ic { margin-top: 3px; }
+.mono, .b-log, .job-out { font: 12px/1.55 ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace; }
+.b-log, .job-out { margin: 10px 0 0; padding: 8px 10px; background: var(--wash); border-radius: 6px; white-space: pre-wrap; overflow-wrap: anywhere; overflow: auto; color: var(--ink); }
+.b-log { max-height: 8em; }
+.job-out { max-height: 280px; }
+.b-side { display: grid; justify-items: end; align-content: start; gap: 10px; }
+.b-pages { text-align: right; line-height: 1.2; }
+.b-n { font: 500 38px/1 var(--cond); font-stretch: condensed; }
+.b-pages small { display: block; font-size: 12.5px; color: var(--ink-2); }
+.thumbs { display: flex; gap: 6px; }
+.thumbs img, .thumbs .pgph { width: 44px; height: 58px; object-fit: cover; border-radius: 3px; border: 1px solid var(--edge); background: var(--wash); display: block; }
+.thumbs .pgph { display: grid; place-items: center; font-size: 12px; color: var(--muted); }
+.batch > .acts, .batch > .err, .batch > .msg, .batch > .confirm, .batch > .copybox { grid-column: 1 / -1; margin-top: 2px; }
+.confirm { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; padding: 10px 12px; border-radius: 8px; background: var(--wash); font-size: 14px; }
+.confirm p { margin: 0; flex: 1 1 260px; }
+.copybox { display: grid; gap: 6px; font-size: 13.5px; }
+.jobs { padding: 14px 18px; }
+.jobs h3 { margin: 0 0 4px; font-size: 16px; font-weight: 600; }
+.job-list { list-style: none; margin: 0; padding: 0; }
+.job { padding: 9px 0; border-top: 1px solid var(--rule); }
+.job:first-child { border-top: 0; }
+.job-row { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; gap: 0 10px; align-items: start; }
+.job-row .ic { margin-top: 3px; }
+.job-l { font-size: 14px; overflow-wrap: anywhere; }
+.job-t { display: block; font-size: 12.5px; color: var(--ink-2); }
+.linkbtn { all: unset; cursor: pointer; font-size: 13px; color: var(--ink-2); text-decoration: underline; text-decoration-color: var(--axis); text-underline-offset: 3px; white-space: nowrap; }
+.linkbtn:hover { color: var(--ink); text-decoration-color: currentColor; }
+.linkbtn:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 3px; }
+.quiet { margin: 0; padding: 8px 0 12px; font-size: 14px; color: var(--ink-2); }
+.toast {
+  position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%); z-index: 60;
+  background: var(--ink); color: var(--paper); padding: 10px 18px; border-radius: 10px; font-size: 14px;
+  box-shadow: 0 12px 30px -12px rgba(0, 0, 0, .5); max-width: calc(100vw - 32px);
+}
+.static-desk { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 18px; margin: 0 4px 16px; font-size: 13px; color: var(--ink-2); }
+.static-desk h2 { margin: 0; font: 600 17px/1.2 var(--cond); font-stretch: condensed; color: var(--ink); }
+.static-desk ul { display: flex; flex-wrap: wrap; gap: 2px 18px; list-style: none; margin: 0; padding: 0; }
+.static-desk .m { color: var(--ink); }
+.static-desk .w { margin-left: 6px; color: var(--muted); }
+.static-desk p { margin: 0; flex-basis: 100%; }
+.static-desk code { font: 12.5px ui-monospace, "SF Mono", Menlo, Consolas, monospace; color: var(--ink); white-space: nowrap; }
+
 @media (max-width: 1080px) {
   .kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .kpi:nth-child(3n + 1) { padding-left: 0; }
@@ -336,6 +454,9 @@ details.checks li { display: grid; grid-template-columns: 4.5em minmax(0, 1fr) a
   .folder { padding: 32px 28px 40px; }
 }
 @media (max-width: 760px) {
+  .batch { grid-template-columns: minmax(0, 1fr); }
+  .b-side { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px 16px; }
+  .b-pages { text-align: left; }
   .docs thead { display: none; }
   .docs, .docs tbody { display: block; }
   .docs tr { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 12px; padding: 12px 0; border-bottom: 1px solid var(--rule); }
@@ -359,6 +480,10 @@ details.checks li { display: grid; grid-template-columns: 4.5em minmax(0, 1fr) a
   .pay td.c-pent { grid-column: 1; font-size: 13px; color: var(--ink-2); }
 }
 @media (max-width: 560px) {
+  .desk-h .tools { margin-left: 0; flex-basis: 100%; }
+  .batches { padding: 4px 14px 6px; }
+  .dev { padding: 14px 14px 16px 18px; }
+  .jobs { padding: 12px 14px; }
   .wrap { padding: 0 8px 32px; }
   .mast { padding: 18px 8px 14px; }
   .folder { padding: 26px 16px 34px; border-radius: 0 12px 12px 12px; }
@@ -372,13 +497,16 @@ details.checks li { display: grid; grid-template-columns: 4.5em minmax(0, 1fr) a
   .tab[aria-pressed="true"] { padding-top: 12px; }
   .filters select { flex: 1 1 calc(50% - 4px); }
 }
+@media (max-width: 420px) {
+  .scanform { grid-template-columns: minmax(0, 1fr); }
+}
 @media (prefers-reduced-motion: reduce) {
-  * { transition: none !important; }
+  * { transition: none !important; animation: none !important; }
 }
 @media print {
   body { background: #fff; }
   .folder { box-shadow: none; border: 0; padding: 0; }
-  .tabs, .theme, .filters, .more, .tools { display: none !important; }
+  .tabs, .theme, .filters, .more, .tools, .desk, .static-desk, .toast { display: none !important; }
 }
 @media (forced-colors: active) {
   .sw, .bar, .slot, .mix span { forced-color-adjust: none; }
@@ -392,6 +520,34 @@ details.checks li { display: grid; grid-template-columns: 4.5em minmax(0, 1fr) a
     <p class="mast-meta" id="meta"></p>
     <button class="btn theme" id="theme" type="button">Theme: auto</button>
   </header>
+
+  <section class="desk" id="desk" aria-labelledby="desk-h" aria-busy="true" hidden>
+    <header class="desk-h">
+      <h2 id="desk-h">Scanners</h2>
+      <span class="tag" id="desk-mock" hidden>Mock data</span>
+      <span class="pulse" id="desk-pulse"></span>
+      <div class="tools">
+        <button class="act" type="button" id="desk-refresh">Refresh catalog</button>
+        <button class="act" type="button" id="desk-reveal">Open scans folder</button>
+      </div>
+    </header>
+    <p class="banner" id="desk-banner" role="status" hidden></p>
+    <p class="err" id="desk-err" role="alert" hidden></p>
+    <p class="msg" id="desk-msg" role="status" hidden></p>
+    <div class="devs" id="devs" hidden>
+      <aside class="jobs" id="jobs" aria-labelledby="jobs-h">
+        <h3 id="jobs-h">Jobs</h3>
+        <p class="quiet" id="jobs-none">No jobs yet. Scans, diagnostics and filing runs show up here.</p>
+        <ol class="job-list" id="job-list"></ol>
+      </aside>
+    </div>
+    <section class="batches" id="batches" aria-labelledby="batches-h" hidden>
+      <div class="batches-h"><h3 id="batches-h">Batches in progress</h3><span id="batches-count"></span></div>
+      <p class="quiet" id="batches-none">No batches staged.</p>
+      <ol class="blist" id="blist"></ol>
+    </section>
+  </section>
+  <aside class="static-desk" id="static-desk" aria-label="Scanners" hidden></aside>
 
   <nav class="tabs" id="tabs" aria-label="Show documents for"></nav>
 
@@ -453,10 +609,15 @@ details.checks li { display: grid; grid-template-columns: 4.5em minmax(0, 1fr) a
 </div>
 
 <div class="tip" id="tip" role="tooltip" hidden></div>
+<div class="toast" id="toast" role="status" hidden></div>
 <noscript><p style="padding:16px">This dashboard needs JavaScript to draw its charts and tables.</p></noscript>
 
 <script id="catalog" type="application/json">
 /*__CATALOG__*/
+</script>
+
+<script id="live" type="application/json">
+/*__LIVE__*/
 </script>
 
 <script>
@@ -542,6 +703,12 @@ details.checks li { display: grid; grid-template-columns: 4.5em minmax(0, 1fr) a
     if (kid == null || kid === false) return;
     if (Array.isArray(kid)) { kid.forEach(function (k) { add(el, k); }); return; }
     el.append(kid instanceof Node ? kid : document.createTextNode(String(kid)));
+  }
+  /* replaceChildren would print null as text; this skips empty slots. */
+  function refill(el) {
+    el.replaceChildren();
+    for (var i = 1; i < arguments.length; i++) add(el, arguments[i]);
+    return el;
   }
   var SVGNS = 'http://www.w3.org/2000/svg';
   function S(tag, attrs) {
@@ -668,7 +835,7 @@ details.checks li { display: grid; grid-template-columns: 4.5em minmax(0, 1fr) a
   /* ---------- status icon ---------- */
   var ICONS = {
     done: ['good', 'check'], pending: ['warn', 'clock'], failed: ['crit', 'bang'], skipped: ['muted', 'dash'],
-    overdue: ['crit', 'bang'], soon: ['warn', 'clock'], later: ['ink', 'dot'], missing: ['crit', 'bang'], unsigned: ['warn', 'bang']
+    overdue: ['crit', 'bang'], soon: ['warn', 'clock'], later: ['ink', 'dot'], run: ['ink', 'dot'], missing: ['crit', 'bang'], unsigned: ['warn', 'bang']
   };
   function icon(kind, label) {
     var spec = ICONS[kind] || ICONS.pending;
@@ -1583,6 +1750,562 @@ details.checks li { display: grid; grid-template-columns: 4.5em minmax(0, 1fr) a
   }
   if (window.ResizeObserver) new ResizeObserver(onResize).observe($('folder'));
   else window.addEventListener('resize', onResize);
+  /* ---------- scanner desk ----------
+     Static copies (Drive, render) carry null in script#live and get a slim
+     scanner list. When scan-catalog serve hosts the page it injects a config
+     with the API base and a token, and the desk polls /status and drives the
+     scanners, batches and jobs. Only the root (scope "all") page gets either. */
+  function readLive() {
+    var el = document.getElementById('live');
+    var raw = el ? el.textContent.trim() : '';
+    if (!raw) return null;
+    try {
+      var v = JSON.parse(raw);
+      return isObj(v) && typeof v.api === 'string' ? v : null;
+    } catch (e) {
+      return null;
+    }
+  }
+  var LIVE = C.scope === 'all' ? readLive() : null;
+  var LIVE_URL = 'http://127.0.0.1:7820/';
+
+  function renderStaticDesk() {
+    var box = $('static-desk');
+    if (C.scope !== 'all' || LIVE) return;
+    box.replaceChildren();
+    box.hidden = false;
+    box.append(H('h2', { text: 'Scanners' }));
+    if (C.scanners.length) {
+      var ul = H('ul');
+      C.scanners.forEach(function (s) {
+        ul.append(H('li', null, H('span', { class: 'm', text: s.model || s.slug }), s.where ? H('span', { class: 'w', text: s.where }) : null));
+      });
+      box.append(ul);
+    }
+    var a = H('a', { text: 'Open live dashboard' });
+    a.href = LIVE_URL;
+    box.append(H('p', null, 'Live status and actions run from the local server: ', H('code', { text: 'scan-catalog serve' }), '. ', a));
+  }
+
+  /* Server timestamps may carry Z, +HH:MM or +HHMM; read them by parts. */
+  function isoMs(s) {
+    if (typeof s !== 'string') return NaN;
+    var m = /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2})(?:\.(\d+))?)?\s*(Z|[+-]\d{2}:?\d{2})?$/.exec(s.trim());
+    if (!m) return NaN;
+    var ms = +('0.' + (m[7] || '0')) * 1000;
+    if (!m[8]) return new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +(m[6] || 0), ms).getTime();
+    var t = Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +(m[6] || 0), ms);
+    if (m[8] === 'Z') return t;
+    var sign = m[8].charAt(0) === '-' ? -1 : 1;
+    var off = m[8].replace(':', '');
+    return t - sign * (+off.slice(1, 3) * 60 + +off.slice(3, 5)) * 60000;
+  }
+  /* "4:30 PM" today, "yesterday 4:30 PM", then "Nov 6, 4:30 PM". */
+  function clock(ms) {
+    var d = new Date(ms), now = new Date(serverNow());
+    var t = fmtTime(d.getHours(), d.getMinutes());
+    var days = Math.round((new Date(now.getFullYear(), now.getMonth(), now.getDate()) - new Date(d.getFullYear(), d.getMonth(), d.getDate())) / 864e5);
+    if (days === 0) return t;
+    if (days === 1) return 'yesterday ' + t;
+    return MON[d.getMonth()] + ' ' + d.getDate() + ', ' + t;
+  }
+
+  var live = {
+    st: null, skew: 0, okAt: 0, frozen: false, timer: 0, inflight: false, again: false,
+    busy: {}, seenRunning: {}, mine: {}, reloading: false,
+    views: { scanners: {}, batches: {}, jobs: {} }
+  };
+  function serverNow() { return Date.now() + live.skew; }
+  function ago(ms) {
+    if (!isFinite(ms)) return '';
+    var s = Math.round((serverNow() - ms) / 1000);
+    if (s < 5) return 'just now';
+    if (s < 60) return s + 's ago';
+    if (s < 3600) return Math.round(s / 60) + ' min ago';
+    var c = clock(ms);
+    return /^\d/.test(c) ? 'at ' + c : c;
+  }
+  /* A span whose "3s ago" text the ticker keeps fresh between polls. */
+  function agoSpan(prefix, iso, suffix) {
+    var ms = isoMs(iso);
+    var el = H('span', { class: 'ago', 'data-at': isFinite(ms) ? ms : null, 'data-prefix': prefix, 'data-suffix': suffix || '' });
+    el.textContent = prefix + ago(ms) + (suffix || '');
+    return el;
+  }
+  function tick() {
+    document.querySelectorAll('#desk .ago[data-at]').forEach(function (el) {
+      el.textContent = el.getAttribute('data-prefix') + ago(+el.getAttribute('data-at')) + el.getAttribute('data-suffix');
+    });
+  }
+
+  function api(path, method, body) {
+    var init = { method: method || 'GET', headers: { 'X-Scan-Token': LIVE.token || '' }, cache: 'no-store' };
+    if (init.method !== 'GET') {
+      init.headers['Content-Type'] = 'application/json';
+      init.body = JSON.stringify(body || {});
+    }
+    return fetch(LIVE.api.replace(/\/+$/, '') + path, init).then(function (r) {
+      return r.text().then(function (t) {
+        var j = null;
+        try { j = t ? JSON.parse(t) : null; } catch (e) { j = null; }
+        if (!r.ok) {
+          if (j && typeof j.error === 'string' && j.error) throw new Error(j.error);
+          if (r.status === 401 || r.status === 403) throw new Error('The live server no longer accepts this page. Reload it to reconnect.');
+          throw new Error('The live server answered with status ' + r.status + '.');
+        }
+        return j;
+      });
+    }, function () {
+      throw new Error('The live server is not answering.');
+    });
+  }
+
+  var SCANNER_STATE = {
+    idle: ['good', 'done', 'Idle'], scanning: ['run', 'run', 'Scanning'], busy: ['warn', 'unsigned', 'Busy'],
+    jam: ['crit', 'failed', 'Paper jam'], 'cover-open': ['warn', 'unsigned', 'Cover open'],
+    offline: ['muted', 'skipped', 'Offline'], error: ['crit', 'failed', 'Error'], unknown: ['muted', 'skipped', 'Unknown']
+  };
+  var BATCH_STATE = {
+    scanning: ['run', 'Scanning', 'Feed more paper, or press Stop when the stack is through.'],
+    stopping: ['run', 'Stopping', 'Stops after the current chunk.'],
+    staged: ['pending', 'Needs analysis', 'Pages are on disk with no manifest yet. Copy the Claude prompt and paste it into Claude to classify and file them.'],
+    ready: ['pending', 'Ready to file', 'Claude wrote the manifest. File it to move each document into place.'],
+    filed: ['done', 'Filed', 'Filed. The staging folder stays until its review items are handled.'],
+    kept: ['done', 'Filed', 'Filed. The staging folder was kept on request. Discard it once the pages are no longer needed.']
+  };
+  function pill(iconKind, label, run) {
+    return H('span', { class: 'pill' + (run ? ' run' : '') }, icon(iconKind), label);
+  }
+  function liveScannerName(slug) {
+    var s = live.st && arr(live.st.scanners).filter(function (x) { return isObj(x) && x.slug === slug; })[0];
+    return s && s.model ? s.model : scannerName(slug);
+  }
+  function allowed(x, a) { return arr(x.actions).indexOf(a) >= 0; }
+
+  /* Every POST goes through here: one request per control at a time, the
+     server's own error sentence shown next to the control, then a fresh poll. */
+  function post(key, btn, errEl, path, body, onOk) {
+    if (live.busy[key]) return;
+    live.busy[key] = true;
+    if (btn) { btn.disabled = true; btn.setAttribute('aria-busy', 'true'); }
+    if (errEl) errEl.hidden = true;
+    api(path, 'POST', body).then(function (res) {
+      if (res && res.job) live.mine[res.job] = true;
+      if (onOk) onOk(res);
+    }, function (e) {
+      if (errEl) showErr(errEl, e.message);
+    }).then(function () {
+      delete live.busy[key];
+      if (btn) btn.removeAttribute('aria-busy');
+      poll();
+    });
+  }
+  function showErr(el, text) {
+    el.replaceChildren(icon('failed'), H('span', { text: text }));
+    el.hidden = false;
+  }
+  function flash(el, text) {
+    el.textContent = text;
+    el.hidden = false;
+    clearTimeout(el._t);
+    el._t = setTimeout(function () { el.hidden = true; }, 6000);
+  }
+  function toast(text) {
+    var t = $('toast');
+    t.textContent = text;
+    t.hidden = false;
+  }
+
+  /* Keyed lists: views keep their buttons, form fields and open panels
+     across polls; only the read-only parts are redrawn. */
+  function syncList(container, store, items, keyOf, create, update) {
+    var seen = {};
+    var prev = null;
+    items.forEach(function (item) {
+      var k = keyOf(item);
+      seen[k] = 1;
+      var v = store[k];
+      if (!v) { v = create(item); store[k] = v; }
+      update(v, item);
+      var want = prev ? prev.nextSibling : container.firstChild;
+      if (v.el !== want) container.insertBefore(v.el, want);
+      prev = v.el;
+    });
+    Object.keys(store).forEach(function (k) {
+      if (!seen[k]) { store[k].el.remove(); delete store[k]; }
+    });
+  }
+
+  function idleLabel(n) { return n < 60 ? n + ' seconds' : n === 60 ? '1 minute' : n / 60 + ' minutes'; }
+  function createScanner(s) {
+    var v = { slug: s.slug, el: H('article', { class: 'dev', id: 'scanner-' + s.slug }) };
+    v.info = H('div');
+    v.scanBtn = H('button', { class: 'act primary', type: 'button', text: 'Scan', 'aria-expanded': 'false' });
+    v.diagBtn = H('button', { class: 'act', type: 'button', text: 'Diagnose' });
+    v.restartBtn = H('button', { class: 'act', type: 'button', text: 'Restart Brother services', hidden: true });
+    v.err = H('p', { class: 'err', role: 'alert', hidden: true });
+    v.msg = H('p', { class: 'msg', role: 'status', hidden: true });
+
+    var uid = 'scan-' + s.slug.replace(/[^a-z0-9_-]/gi, '');
+    v.user = H('select', { id: uid + '-user' });
+    var users = C.users.slice();
+    if (LIVE.default_user && !users.some(function (u) { return u.slug === LIVE.default_user; })) users.push({ slug: LIVE.default_user, name: LIVE.default_user });
+    users.forEach(function (u) {
+      var o = H('option', { value: u.slug, text: u.name || u.slug });
+      if (u.slug === LIVE.default_user) o.selected = true;
+      v.user.append(o);
+    });
+    v.duplex = H('input', { type: 'checkbox', id: uid + '-duplex', checked: true });
+    v.color = H('input', { type: 'radio', name: uid + '-mode', value: 'color', checked: true });
+    v.gray = H('input', { type: 'radio', name: uid + '-mode', value: 'gray' });
+    v.idle = H('select', { id: uid + '-idle' });
+    [30, 60, 120, 300].forEach(function (n) {
+      var o = H('option', { value: n, text: idleLabel(n) });
+      if (n === 60) o.selected = true;
+      v.idle.append(o);
+    });
+    v.startBtn = H('button', { class: 'act primary', type: 'button', text: 'Start scan' });
+    v.cancelBtn = H('button', { class: 'act', type: 'button', text: 'Cancel' });
+    v.form = H('div', { class: 'scanform', role: 'group', 'aria-label': 'Scan settings', hidden: true },
+      H('label', { class: 'f', for: uid + '-user' }, 'Person at the scanner', v.user),
+      H('label', { class: 'f', for: uid + '-idle' }, 'Stop after idle', v.idle),
+      H('label', { class: 'chk' }, v.duplex, 'Both sides'),
+      H('fieldset', { class: 'seg' }, H('legend', { class: 'sr', text: 'Color mode' }),
+        H('label', null, v.color, H('span', { text: 'Color' })),
+        H('label', null, v.gray, H('span', { text: 'Gray' }))),
+      H('div', { class: 'acts' }, v.startBtn, v.cancelBtn));
+
+    function openForm(open) {
+      v.form.hidden = !open;
+      v.scanBtn.setAttribute('aria-expanded', String(open));
+      if (open) v.user.focus(); else v.scanBtn.focus();
+    }
+    v.scanBtn.addEventListener('click', function () { openForm(v.form.hidden); });
+    v.cancelBtn.addEventListener('click', function () { openForm(false); });
+    v.startBtn.addEventListener('click', function () {
+      post('scan:' + v.slug, v.startBtn, v.err, '/scan', {
+        scanner: v.slug, user: v.user.value, duplex: v.duplex.checked, gray: v.gray.checked, idle: +v.idle.value
+      }, function () {
+        openForm(false);
+        flash(v.msg, 'Scan started. Its batch shows up below in a few seconds.');
+      });
+    });
+    v.diagBtn.addEventListener('click', function () {
+      post('diag', v.diagBtn, v.err, '/diag', {}, function () { flash(v.msg, 'Diagnostics running. The output is under Jobs.'); });
+    });
+    v.restartBtn.addEventListener('click', function () {
+      post('restart', v.restartBtn, v.err, '/brother/restart', {}, function () { flash(v.msg, 'Restarting the Brother services. Progress is under Jobs.'); });
+    });
+    v.el.append(v.info, H('div', { class: 'acts' }, v.scanBtn, v.diagBtn, v.restartBtn), v.err, v.msg, v.form);
+    return v;
+  }
+  function updateScanner(v, s) {
+    var spec = SCANNER_STATE[s.state] || SCANNER_STATE.unknown;
+    v.el.className = 'dev t-' + spec[0];
+    v.el.setAttribute('aria-label', (s.model || s.slug) + ', ' + spec[2]);
+    var facts = H('dl', { class: 'facts' });
+    function fact(k, val) { if (val) facts.append(H('div', null, H('dt', { text: k }), H('dd', null, val))); }
+    fact('Paper', s.paper === true ? 'In the feeder' : s.paper === false ? 'Feeder empty' : 'Unknown');
+    fact('Link', s.connection === 'usb' ? 'USB' : s.connection === 'network' ? 'Network' : s.present === false ? 'Not found' : 'Unknown');
+    fact('Checked', agoSpan('', s.checked));
+    var chips = null;
+    if (Array.isArray(s.services)) {
+      chips = H('ul', { class: 'chips', 'aria-label': 'Brother services' });
+      s.services.filter(isObj).forEach(function (sv) {
+        chips.append(H('li', null, icon(sv.running ? 'done' : 'failed', sv.running ? 'Running' : 'Stopped'), String(sv.name || 'service')));
+      });
+    }
+    var batchLine = null;
+    /* Skip the line when the server's detail already names the batch. */
+    if (s.batch && String(s.detail || '').indexOf(s.batch) < 0) {
+      var a = H('a', { text: s.batch });
+      a.href = '#batch-' + encodeURIComponent(s.batch);
+      batchLine = H('p', { class: 'dev-batch' }, 'Scanning ', a);
+    }
+    refill(v.info, 
+      H('header', { class: 'dev-h' },
+        H('div', null, H('h3', { class: 'dev-model', text: s.model || scannerName(s.slug) }), s.where ? H('p', { class: 'dev-where', text: s.where }) : null),
+        pill(spec[1], spec[2], spec[0] === 'run')),
+      s.detail ? H('p', { class: 'dev-detail', text: s.detail }) : null,
+      facts, chips, batchLine);
+    var frozen = live.frozen;
+    v.scanBtn.disabled = frozen || !allowed(s, 'scan') || !!live.busy['scan:' + v.slug];
+    v.startBtn.disabled = v.scanBtn.disabled;
+    v.diagBtn.disabled = frozen || !allowed(s, 'diag') || !!live.busy.diag;
+    var canRestart = allowed(s, 'restart-services');
+    v.restartBtn.hidden = !canRestart;
+    v.restartBtn.disabled = frozen || !canRestart || !!live.busy.restart;
+    if (!allowed(s, 'scan') && !v.form.hidden) {
+      v.form.hidden = true;
+      v.scanBtn.setAttribute('aria-expanded', 'false');
+    }
+  }
+
+  var BATCH_ACTIONS = [
+    ['stop', 'Stop', 'act'], ['resume', 'Resume scanning', 'act'], ['file', 'File', 'act primary'],
+    ['analyze', 'Copy Claude prompt', 'act'], ['reveal', 'Show in Finder', 'act'], ['discard', 'Discard', 'act']
+  ];
+  function createBatch(b) {
+    var v = { id: b.id, el: H('li', { class: 'batch', id: 'batch-' + b.id }), btn: {}, thumbsKey: '' };
+    v.main = H('div', { class: 'b-main' });
+    v.pages = H('div', { class: 'b-pages' });
+    v.thumbs = H('div', { class: 'thumbs' });
+    v.acts = H('div', { class: 'acts' });
+    v.err = H('p', { class: 'err', role: 'alert', hidden: true });
+    v.msg = H('p', { class: 'msg', role: 'status', hidden: true });
+    var path = '/batches/' + encodeURIComponent(b.id);
+    BATCH_ACTIONS.forEach(function (a) {
+      var btn = H('button', { class: a[2], type: 'button', text: a[1], 'aria-label': a[1] + ', ' + b.id, hidden: true });
+      v.btn[a[0]] = btn;
+      v.acts.append(btn);
+    });
+    v.btn.stop.addEventListener('click', function () { post('stop:' + v.id, v.btn.stop, v.err, path + '/stop', {}, function () { flash(v.msg, 'Stopping after the current chunk.'); }); });
+    v.btn.resume.addEventListener('click', function () { post('resume:' + v.id, v.btn.resume, v.err, path + '/resume', {}, function () { flash(v.msg, 'Scanning resumed. Load the next stack.'); }); });
+    v.btn.file.addEventListener('click', function () { post('file:' + v.id, v.btn.file, v.err, path + '/file', {}, function () { flash(v.msg, 'Filing. The page reloads when it finishes.'); }); });
+    v.btn.reveal.addEventListener('click', function () { post('reveal:' + v.id, v.btn.reveal, v.err, path + '/reveal', {}); });
+
+    v.copyBox = H('div', { class: 'copybox', hidden: true });
+    v.btn.analyze.addEventListener('click', function () {
+      var text = 'Use the scan skill to analyze and file the staged batch at ' + (v.dir || v.id);
+      var done = function () {
+        v.copyBox.hidden = true;
+        flash(v.msg, 'Prompt copied. Paste it into Claude; Claude asks before it files anything.');
+      };
+      var fail = function () {
+        var input = H('input', { type: 'text', readonly: true, value: text, 'aria-label': 'Claude prompt' });
+        refill(v.copyBox, H('span', { text: 'The browser blocked the clipboard. Copy the prompt from here:' }), input);
+        v.copyBox.hidden = false;
+        input.focus();
+        input.select();
+      };
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(done, fail);
+      else fail();
+    });
+
+    v.confirmBtn = H('button', { class: 'act danger', type: 'button', text: 'Move to Trash' });
+    v.keepBtn = H('button', { class: 'act', type: 'button', text: 'Keep it' });
+    v.confirm = H('div', { class: 'confirm', role: 'group', 'aria-label': 'Confirm discard', hidden: true },
+      H('p', { text: 'Move this batch to the Trash? The pages can be restored from there.' }), v.confirmBtn, v.keepBtn);
+    function arm(on) {
+      v.confirm.hidden = !on;
+      v.btn.discard.hidden = on;
+      (on ? v.keepBtn : v.btn.discard).focus();
+    }
+    v.btn.discard.addEventListener('click', function () { arm(true); });
+    v.keepBtn.addEventListener('click', function () { arm(false); });
+    v.confirmBtn.addEventListener('click', function () {
+      post('discard:' + v.id, v.confirmBtn, v.err, path + '/discard', {}, function () { v.confirm.hidden = true; });
+    });
+
+    v.el.append(v.main, H('div', { class: 'b-side' }, v.pages, v.thumbs), v.acts, v.confirm, v.copyBox, v.err, v.msg);
+    return v;
+  }
+  function updateBatch(v, b) {
+    v.dir = b.dir;
+    var spec = BATCH_STATE[b.state === 'filed' && !b.review_items ? 'kept' : b.state] || ['pending', String(b.state || 'Unknown'), ''];
+    var meta = H('p', { class: 'b-meta' });
+    if (b.scanner) meta.append(H('span', { text: liveScannerName(b.scanner) }));
+    if (b.user) meta.append(H('span', { text: userName(b.user) }));
+    meta.append(H('span', { text: (b.mode === 'Gray' ? 'Gray' : 'Color') + ', ' + (b.duplex ? 'both sides' : 'one side') + (b.resolution ? ', ' + b.resolution + ' dpi' : '') }));
+    if (b.default_entity) meta.append(H('span', { text: 'For ' + entName(b.default_entity) }));
+    var started = isoMs(b.started);
+    if (isFinite(started)) meta.append(H('span', { text: 'Started ' + clock(started) }));
+    if (b.updated) meta.append(agoSpan('Updated ', b.updated));
+    var log = null;
+    if ((b.state === 'scanning' || b.state === 'stopping') && arr(b.log_tail).length) {
+      log = H('pre', { class: 'b-log', 'aria-label': 'Scanner log' });
+      log.textContent = arr(b.log_tail).join('\n');
+    }
+    refill(v.main, 
+      H('div', { class: 'b-top' }, pill(spec[0], spec[1], spec[0] === 'run'), H('span', { class: 'b-id', text: b.id })),
+      meta,
+      spec[2] ? H('p', { class: 'b-next', text: spec[2] }) : null,
+      b.odd_pages ? H('p', { class: 'b-warn' }, icon('unsigned', 'Warning'), 'Odd page count on a two-sided scan, so two sheets may have fed together. ' + (b.state === 'filed' ? 'Check the filed documents for a missing page.' : 'Check the last pages before filing.')) : null,
+      log);
+    log && (log.scrollTop = log.scrollHeight);
+
+    var n = Math.max(0, +b.pages || 0);
+    var sub = null;
+    if (b.documents != null) {
+      sub = plural(+b.documents, 'document') + (b.review_items ? ', ' + num(b.review_items) + ' for review' : '');
+    }
+    refill(v.pages, H('span', { class: 'b-n', text: num(n) }), ' ', n === 1 ? 'page' : 'pages', sub ? H('small', { text: sub }) : null);
+
+    var key = b.id + ':' + n;
+    if (key !== v.thumbsKey) {
+      v.thumbsKey = key;
+      v.thumbs.replaceChildren();
+      for (var i = Math.max(1, n - 5); i <= n; i++) {
+        (function (p) {
+          var img = H('img', { alt: 'Page ' + p, title: 'Page ' + p, loading: 'lazy', decoding: 'async', width: 44, height: 58 });
+          img.addEventListener('error', function () { img.replaceWith(H('span', { class: 'pgph', text: String(p), title: 'Page ' + p })); });
+          img.src = LIVE.api.replace(/\/+$/, '') + '/batches/' + encodeURIComponent(b.id) + '/thumb/' + p;
+          v.thumbs.append(img);
+        })(i);
+      }
+      v.thumbs.hidden = !n;
+    }
+
+    BATCH_ACTIONS.forEach(function (a) {
+      var ok = allowed(b, a[0]);
+      var btn = v.btn[a[0]];
+      if (a[0] === 'discard') {
+        if (!ok) v.confirm.hidden = true;
+        btn.hidden = !ok || !v.confirm.hidden;
+      } else {
+        btn.hidden = !ok;
+      }
+      btn.disabled = live.frozen || (a[0] !== 'analyze' && !!live.busy[a[0] + ':' + v.id]);
+    });
+    v.confirmBtn.disabled = live.frozen || !!live.busy['discard:' + v.id];
+  }
+
+  function jobTime(j) {
+    var st = isoMs(j.started), en = isoMs(j.ended);
+    if (j.state === 'running') return agoSpan('Running, started ', j.started);
+    if (j.state === 'failed') return agoSpan('Failed ', j.ended || j.started, j.exit_code != null ? ' with exit code ' + j.exit_code : '');
+    var took = isFinite(st) && isFinite(en) ? Math.max(0, Math.round((en - st) / 1000)) : null;
+    return agoSpan('Finished ', j.ended || j.started, took != null ? ', took ' + (took < 60 ? took + 's' : Math.round(took / 60) + ' min') : '');
+  }
+  function createJob(j) {
+    var v = { id: j.id, el: H('li', { class: 'job' }), open: false, loading: false, loaded: false };
+    v.row = H('div', { class: 'job-row' });
+    v.toggle = H('button', { class: 'linkbtn', type: 'button', 'aria-expanded': 'false', text: 'Output' });
+    v.out = H('pre', { class: 'job-out', hidden: true, tabindex: 0, 'aria-label': 'Job output' });
+    v.toggle.addEventListener('click', function () {
+      v.open = !v.open;
+      v.toggle.setAttribute('aria-expanded', String(v.open));
+      v.toggle.textContent = v.open ? 'Hide output' : 'Output';
+      v.out.hidden = !v.open;
+      if (v.open) loadOutput(v);
+    });
+    v.el.append(v.row, v.out);
+    return v;
+  }
+  function loadOutput(v) {
+    if (v.loading) return;
+    v.loading = true;
+    if (!v.loaded) v.out.textContent = 'Loading output…';
+    api('/jobs/' + encodeURIComponent(v.id)).then(function (j) {
+      var atEnd = v.out.scrollTop + v.out.clientHeight >= v.out.scrollHeight - 8;
+      var text = j && typeof j.output === 'string' ? j.output : '';
+      v.out.textContent = text.trim() ? text : 'No output yet.';
+      v.loaded = true;
+      if (atEnd) v.out.scrollTop = v.out.scrollHeight;
+    }, function (e) {
+      v.out.textContent = e.message;
+    }).then(function () { v.loading = false; });
+  }
+  function updateJob(v, j) {
+    var kind = j.state === 'running' ? 'run' : j.state === 'failed' ? 'failed' : 'done';
+    refill(v.row, 
+      icon(kind, j.state === 'running' ? 'Running' : j.state === 'failed' ? 'Failed' : 'Done'),
+      H('div', null, H('span', { class: 'job-l', text: j.label || j.kind || j.id }), H('span', { class: 'job-t' }, jobTime(j))),
+      v.toggle);
+    v.toggle.setAttribute('aria-label', (v.open ? 'Hide output of ' : 'Show output of ') + (j.label || j.id));
+    if (v.open && (j.state === 'running' || v.lastState !== j.state)) loadOutput(v);
+    v.lastState = j.state;
+  }
+
+  function renderDesk() {
+    var st = live.st;
+    var desk = $('desk');
+    $('desk-mock').hidden = !(LIVE.mock || (st && st.mock));
+    var pulse = $('desk-pulse');
+    pulse.className = 'pulse' + (live.frozen ? ' frozen' : '');
+    refill(pulse, H('i'), live.frozen ? 'Not connected' : st ? agoSpan('Live on ' + (LIVE.host || 'this Mac') + ', updated ', st.now) : 'Connecting');
+    var banner = $('desk-banner');
+    if (live.frozen) {
+      banner.textContent = live.okAt
+        ? 'Live server stopped. Status is frozen as of ' + clock(live.okAt) + '. Trying again every 10 seconds.'
+        : 'The live server is not answering. Start it with scan-catalog serve, then reload this page.';
+      banner.hidden = false;
+    } else {
+      banner.hidden = true;
+    }
+    $('desk-refresh').disabled = live.frozen || !!live.busy.refresh;
+    $('desk-reveal').disabled = live.frozen || !!live.busy.revealRoot;
+    $('devs').hidden = !st;
+    $('batches').hidden = !st;
+    if (!st) return;
+    desk.setAttribute('aria-busy', 'false');
+
+    var devs = $('devs');
+    var scanners = arr(st.scanners).filter(function (s) { return isObj(s) && s.slug; });
+    syncList(devs, live.views.scanners, scanners, function (s) { return s.slug; }, createScanner, updateScanner);
+    var jobsBox = $('jobs');
+    if (jobsBox.parentNode !== devs || devs.lastChild !== jobsBox) devs.append(jobsBox);
+
+    var batches = arr(st.batches).filter(function (b) { return isObj(b) && b.id; });
+    var blist = $('blist');
+    syncList(blist, live.views.batches, batches, function (b) { return b.id; }, createBatch, updateBatch);
+    $('batches-none').hidden = batches.length > 0;
+    $('batches-count').textContent = batches.length ? plural(batches.length, 'batch', 'batches') : '';
+
+    var jobs = arr(st.jobs).filter(function (j) { return isObj(j) && j.id; }).sort(function (a, b) {
+      if ((a.state === 'running') !== (b.state === 'running')) return a.state === 'running' ? -1 : 1;
+      return (isoMs(b.started) || 0) - (isoMs(a.started) || 0);
+    }).slice(0, 8);
+    syncList($('job-list'), live.views.jobs, jobs, function (j) { return j.id; }, createJob, updateJob);
+    $('jobs-none').hidden = jobs.length > 0;
+
+    arr(st.jobs).forEach(function (j) {
+      if (!isObj(j)) return;
+      if (j.state === 'running') live.seenRunning[j.id] = true;
+      if (j.reload && j.state === 'done' && (live.seenRunning[j.id] || live.mine[j.id]) && !live.reloading) {
+        live.reloading = true;
+        toast(j.kind === 'file' ? 'Filed. Reloading…' : 'Catalog rebuilt. Reloading…');
+        setTimeout(function () { location.reload(); }, 1500);
+      }
+    });
+  }
+
+  function pollMs() { return Math.max(1000, +LIVE.poll_ms || 3000); }
+  function schedule(ms) { clearTimeout(live.timer); live.timer = setTimeout(poll, ms); }
+  function poll() {
+    clearTimeout(live.timer);
+    if (document.hidden) return;
+    if (live.inflight) { live.again = true; return; }
+    live.inflight = true;
+    api('/status').then(function (st) {
+      live.inflight = false;
+      if (!isObj(st)) throw new Error('Status was not an object.');
+      var wasFrozen = live.frozen;
+      live.st = st;
+      live.frozen = false;
+      var now = isoMs(st.now);
+      live.skew = isFinite(now) ? now - Date.now() : 0;
+      live.okAt = Date.now();
+      try { renderDesk(); } catch (e) { if (window.console) console.error(e); }
+      if (wasFrozen) tick();
+      schedule(live.again ? 0 : pollMs());
+      live.again = false;
+    }).catch(function () {
+      live.inflight = false;
+      live.again = false;
+      live.frozen = true;
+      try { renderDesk(); } catch (e) { if (window.console) console.error(e); }
+      schedule(10000);
+    });
+  }
+
+  function initDesk() {
+    var desk = $('desk');
+    desk.hidden = false;
+    $('desk-refresh').addEventListener('click', function () {
+      post('refresh', $('desk-refresh'), $('desk-err'), '/dashboard/refresh', {}, function () { flash($('desk-msg'), 'Rebuilding the catalog. The page reloads when it finishes.'); });
+    });
+    $('desk-reveal').addEventListener('click', function () {
+      post('revealRoot', $('desk-reveal'), $('desk-err'), '/reveal', { target: 'root' });
+    });
+    document.addEventListener('visibilitychange', function () { if (!document.hidden) poll(); });
+    setInterval(tick, 1000);
+    renderDesk();
+    poll();
+  }
+
+  if (LIVE) initDesk();
+  else renderStaticDesk();
 })();
 </script>
 </body>
