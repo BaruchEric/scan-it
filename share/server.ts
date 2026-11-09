@@ -472,12 +472,18 @@ class RealBackend implements Backend {
   async scanners(defs: ScannerDef[], batches: Batch[], force: boolean): Promise<Scanner[]> {
     const busy = new Set(batches.filter((b) => b.state === "scanning" || b.state === "stopping")
       .map((b) => b.scanner ?? ""));
+    // An offline Brother costs ~4 s of Bonjour browsing per probe, longer than
+    // the page's poll interval. So a stale cache is served at once while a
+    // background probe refreshes it; only the first call and actions
+    // (force) wait for a fresh result.
     const fresh = Date.now() - this.cache.at < 5000;
     if (force || !fresh) {
       if (!this.probing) {
-        this.probing = this.probeAll(defs, busy).finally(() => { this.probing = null; });
+        this.probing = this.probeAll(defs, busy)
+          .then((data) => { this.cache = { at: Date.now(), data }; return data; })
+          .finally(() => { this.probing = null; });
       }
-      this.cache = { at: Date.now(), data: await this.probing };
+      if (force || this.cache.at === 0) await this.probing;
     }
     const list = defs.map((d) => this.cache.data.get(d.slug) ?? unknownScanner(d));
     return overlayBusy(list, batches);
