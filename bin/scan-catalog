@@ -33,6 +33,9 @@ Commands:
                               (default 7820): scanner status, batches in
                               progress, and buttons to scan, stop, file and
                               diagnose. Local only; needs bun.
+  serve --install [--port N] | serve --uninstall
+                              keep it running at login as a LaunchAgent
+                              (ca.beric.scan-it-dashboard), or remove it
 
 Workflows: $workflows
 Statuses:  $statuses
@@ -231,17 +234,80 @@ case "$cmd" in
     if (( open_it )); then open "$root/dashboard.html"; fi ;;
 
   serve)
-    port=7820 server_args=()
+    port=7820 server_args=() agent=""
     while [[ $# -gt 0 ]]; do
       case "$1" in
         --port)
           [[ $# -ge 2 && "$2" =~ ^[0-9]+$ ]] || die "--port requires a number" 64
           port="$2"; shift 2 ;;
         --no-open|--mock) server_args+=("$1"); shift ;;
+        --install|--uninstall) agent="${1#--}"; shift ;;
         *) die "serve: unknown argument: $1" 64 ;;
       esac
     done
     url="http://127.0.0.1:$port/"
+    label="ca.beric.scan-it-dashboard"
+    plist="$HOME/Library/LaunchAgents/$label.plist"
+    if [[ "$agent" == uninstall ]]; then
+      launchctl bootout "gui/$(id -u)/$label" 2>/dev/null || true
+      rm -f "$plist"
+      echo "Removed the $label LaunchAgent."
+      exit 0
+    fi
+    if [[ "$agent" == install ]]; then
+      xml() { sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g' <<<"$1"; }
+      bun_dir=$(dirname "$(command -v bun 2>/dev/null || echo "$HOME/.bun/bin/bun")")
+      mkdir -p "$HOME/Library/LaunchAgents" "$HOME/Library/Logs"
+      cat > "$plist" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Written by scan-catalog serve --install. Remove with scan-catalog serve --uninstall. -->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>$label</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>$(xml "$script_dir/scan-catalog")</string>
+        <string>-r</string>
+        <string>$(xml "$root")</string>
+        <string>serve</string>
+        <string>--no-open</string>
+        <string>--port</string>
+        <string>$port</string>
+    </array>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>$(xml "$bun_dir:$HOME/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin")</string>
+    </dict>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>30</integer>
+    <key>StandardOutPath</key>
+    <string>$(xml "$HOME/Library/Logs/scan-it-dashboard.log")</string>
+    <key>StandardErrorPath</key>
+    <string>$(xml "$HOME/Library/Logs/scan-it-dashboard.log")</string>
+</dict>
+</plist>
+PLIST
+      plutil -lint "$plist" >/dev/null || die "wrote an invalid plist: $plist"
+      launchctl bootout "gui/$(id -u)/$label" 2>/dev/null || true
+      launchctl bootstrap "gui/$(id -u)" "$plist" || die "launchctl bootstrap failed for $plist"
+      for _ in $(seq 1 50); do
+        curl -fsS --max-time 1 "${url}api/ping" >/dev/null 2>&1 && break
+        sleep 0.2
+      done
+      curl -fsS --max-time 1 "${url}api/ping" >/dev/null 2>&1 \
+        || die "the LaunchAgent started but nothing answers on $url (log: ~/Library/Logs/scan-it-dashboard.log)"
+      echo "Live dashboard runs at login: $url"
+      echo "  LaunchAgent $plist, log ~/Library/Logs/scan-it-dashboard.log"
+      exit 0
+    fi
     # Already running on that port: just open it.
     if curl -fsS --max-time 1 "${url}api/ping" 2>/dev/null | grep -q '"app":"scan-it"'; then
       echo "scan-it live dashboard already running: $url"

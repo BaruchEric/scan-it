@@ -616,7 +616,11 @@ class RealBackend implements Backend {
       `pkill -f '${BROTHER_SERVER_DIR}/(LOGINserver|USBserver|NETserver)' || true`,
       "sleep 1",
       `open '${BROTHER_SERVER_DIR}/LOGINserver.app'`,
-      "sleep 4",
+      // LOGINserver starts USBserver at once and NETserver about 20 s later.
+      "for _ in $(seq 1 40); do",
+      `  pgrep -qf '${BROTHER_SERVER_DIR}/USBserver' && pgrep -qf '${BROTHER_SERVER_DIR}/NETserver' && break`,
+      "  sleep 1",
+      "done",
       `echo 'Brother services now running:'`,
       `pgrep -fl 'Brother/Utilities/Server' | sed -E 's#.*/([A-Za-z]+server)\\.app.*#  \\1#' | sort -u`,
     ].join("\n");
