@@ -479,7 +479,7 @@ details.checks li { display: grid; grid-template-columns: 4.5em minmax(0, 1fr) a
   var WORKFLOWS = [
     { key: 'quickbooks',   title: 'QuickBooks drafts',  what: 'Business receipts and invoices to draft in QuickBooks.', short: 'QuickBooks' },
     { key: 'calendar',     title: 'Calendar reminders', what: 'Due dates that still need a Google Calendar reminder.', short: 'Calendar' },
-    { key: 'tax_copy',     title: 'Tax folder copies',  what: "Documents to copy into the entity's Drive Tax folder.", short: 'Tax copy' },
+    { key: 'copy',         title: 'Drive folder copies', what: "Tax and medical PDFs copied into their Drive folder (the property's Tax folder, MedicalRecords). Listed here only when a copy failed.", short: 'Drive copy' },
     { key: 'vault',        title: 'Medical record notes', what: 'Medical documents that need a note in the vault.', short: 'Vault note' },
     { key: 'check_report', title: 'Paycheck reports',   what: 'Pay runs that still need their check report.', short: 'Check report' }
   ];
@@ -1318,7 +1318,7 @@ details.checks li { display: grid; grid-template-columns: 4.5em minmax(0, 1fr) a
     body.replaceChildren();
     if (!v.pays.length) {
       note.textContent = '';
-      body.append(H('p', { class: 'empty', text: state.entity === 'all' ? 'No pay runs filed. Scan one with scan-checks and it shows up here.' : 'No pay runs filed for ' + entName(state.entity) + '.' }));
+      body.append(H('p', { class: 'empty', text: state.entity === 'all' ? 'No pay runs filed yet. Paychecks scanned with scan-batch land here after filing.' : 'No pay runs filed for ' + entName(state.entity) + '.' }));
       return;
     }
     var pays = v.pays.slice().sort(function (a, b) { return String(b.paydate || '').localeCompare(String(a.paydate || '')); });

@@ -235,7 +235,7 @@
       },
       "filed": "2026-08-02T10:53:00-0800",
       "followups": {
-        "tax_copy": {
+        "copy": {
           "status": "done",
           "note": null,
           "updated": "2026-08-02T10:55:00-0800",
@@ -268,7 +268,7 @@
       },
       "filed": "2026-06-20T09:40:00-0800",
       "followups": {
-        "tax_copy": {
+        "copy": {
           "status": "done",
           "note": null,
           "updated": "2026-06-20T09:42:00-0800",
@@ -516,7 +516,7 @@
           "updated": "2026-06-20T09:38:00-0800",
           "ref": "qbo-draft-1215"
         },
-        "tax_copy": {
+        "copy": {
           "status": "done",
           "note": null,
           "updated": "2026-06-20T09:38:00-0800",
@@ -554,7 +554,7 @@
           "updated": "2026-07-11T14:30:00-0800",
           "ref": "qbo-draft-1216"
         },
-        "tax_copy": {
+        "copy": {
           "status": "done",
           "note": null,
           "updated": "2026-07-11T14:30:00-0800",
@@ -592,7 +592,7 @@
           "updated": "2026-08-02T11:00:00-0800",
           "ref": "qbo-draft-1217"
         },
-        "tax_copy": {
+        "copy": {
           "status": "done",
           "note": null,
           "updated": "2026-08-02T11:00:00-0800",
@@ -630,7 +630,7 @@
           "updated": "2026-06-20T09:44:00-0800",
           "ref": "qbo-draft-1218"
         },
-        "tax_copy": {
+        "copy": {
           "status": "done",
           "note": null,
           "updated": "2026-06-20T09:44:00-0800",
@@ -668,7 +668,7 @@
           "updated": "2026-07-11T14:31:00-0800",
           "ref": "qbo-draft-1219"
         },
-        "tax_copy": {
+        "copy": {
           "status": "done",
           "note": null,
           "updated": "2026-07-11T14:31:00-0800",
@@ -706,7 +706,7 @@
           "updated": "2026-08-02T10:59:00-0800",
           "ref": "qbo-draft-1220"
         },
-        "tax_copy": {
+        "copy": {
           "status": "done",
           "note": null,
           "updated": "2026-08-02T10:59:00-0800",
@@ -744,7 +744,7 @@
           "updated": "2026-06-20T09:35:00-0800",
           "ref": "qbo-draft-1221"
         },
-        "tax_copy": {
+        "copy": {
           "status": "done",
           "note": null,
           "updated": "2026-06-20T09:35:00-0800",
@@ -782,7 +782,7 @@
           "updated": "2026-08-25T11:51:00-0800",
           "ref": "qbo-draft-1222"
         },
-        "tax_copy": {
+        "copy": {
           "status": "done",
           "note": null,
           "updated": "2026-08-25T11:51:00-0800",
@@ -820,7 +820,7 @@
           "updated": "2026-11-01T12:14:00-0800",
           "ref": null
         },
-        "tax_copy": {
+        "copy": {
           "status": "pending",
           "note": null,
           "updated": "2026-11-01T12:14:00-0800",
@@ -858,7 +858,7 @@
           "updated": "2026-11-08T17:05:00-0800",
           "ref": null
         },
-        "tax_copy": {
+        "copy": {
           "status": "pending",
           "note": null,
           "updated": "2026-11-08T17:05:00-0800",
@@ -898,7 +898,7 @@
           "updated": "2026-07-11T14:39:00-0800",
           "ref": "qbo-draft-1225"
         },
-        "tax_copy": {
+        "copy": {
           "status": "done",
           "note": null,
           "updated": "2026-07-11T14:39:00-0800",
@@ -944,7 +944,7 @@
           "updated": "2026-08-02T11:08:00-0800",
           "ref": "qbo-draft-1226"
         },
-        "tax_copy": {
+        "copy": {
           "status": "done",
           "note": null,
           "updated": "2026-08-02T11:08:00-0800",
@@ -990,7 +990,7 @@
           "updated": "2026-06-20T09:35:00-0800",
           "ref": "qbo-draft-1227"
         },
-        "tax_copy": {
+        "copy": {
           "status": "done",
           "note": null,
           "updated": "2026-06-20T09:35:00-0800",
@@ -1036,7 +1036,7 @@
           "updated": "2026-10-02T13:18:00-0800",
           "ref": "qbo-draft-1228"
         },
-        "tax_copy": {
+        "copy": {
           "status": "done",
           "note": null,
           "updated": "2026-10-02T13:18:00-0800",
@@ -1082,7 +1082,7 @@
           "updated": "2026-10-20T08:21:00-0800",
           "ref": null
         },
-        "tax_copy": {
+        "copy": {
           "status": "done",
           "note": null,
           "updated": "2026-10-20T08:21:00-0800",
@@ -1128,7 +1128,7 @@
           "updated": "2026-11-05T09:54:00-0800",
           "ref": null
         },
-        "tax_copy": {
+        "copy": {
           "status": "done",
           "note": null,
           "updated": "2026-11-05T09:54:00-0800",
@@ -1242,7 +1242,7 @@
       },
       "filed": "2026-07-11T14:31:00-0800",
       "followups": {
-        "tax_copy": {
+        "copy": {
           "status": "done",
           "note": null,
           "updated": "2026-07-11T14:33:00-0800",
@@ -1274,7 +1274,7 @@
       },
       "filed": "2026-08-02T10:58:00-0800",
       "followups": {
-        "tax_copy": {
+        "copy": {
           "status": "done",
           "note": null,
           "updated": "2026-08-02T11:00:00-0800",
@@ -1368,7 +1368,7 @@
           "updated": "2026-08-02T11:00:00-0800",
           "ref": "qbo-draft-1238"
         },
-        "tax_copy": {
+        "copy": {
           "status": "done",
           "note": null,
           "updated": "2026-08-02T11:00:00-0800",
@@ -1406,7 +1406,7 @@
           "updated": "2026-06-20T09:39:00-0800",
           "ref": "qbo-draft-1239"
         },
-        "tax_copy": {
+        "copy": {
           "status": "done",
           "note": null,
           "updated": "2026-06-20T09:39:00-0800",
@@ -1444,7 +1444,7 @@
           "updated": "2026-07-11T14:35:00-0800",
           "ref": "qbo-draft-1240"
         },
-        "tax_copy": {
+        "copy": {
           "status": "done",
           "note": null,
           "updated": "2026-07-11T14:35:00-0800",
@@ -1482,7 +1482,7 @@
           "updated": "2026-09-14T15:22:00-0800",
           "ref": "qbo-draft-1241"
         },
-        "tax_copy": {
+        "copy": {
           "status": "done",
           "note": null,
           "updated": "2026-09-14T15:22:00-0800",
@@ -1522,7 +1522,7 @@
           "updated": "2026-06-20T09:35:00-0800",
           "ref": "qbo-draft-1242"
         },
-        "tax_copy": {
+        "copy": {
           "status": "done",
           "note": null,
           "updated": "2026-06-20T09:35:00-0800",
@@ -1568,7 +1568,7 @@
           "updated": "2026-11-03T09:28:00-0800",
           "ref": null
         },
-        "tax_copy": {
+        "copy": {
           "status": "done",
           "note": null,
           "updated": "2026-11-03T09:28:00-0800",
@@ -1656,7 +1656,7 @@
       },
       "filed": "2026-07-11T14:36:00-0800",
       "followups": {
-        "tax_copy": {
+        "copy": {
           "status": "done",
           "note": null,
           "updated": "2026-07-11T14:38:00-0800",
@@ -1726,7 +1726,7 @@
           "updated": "2026-06-20T09:36:00-0800",
           "ref": "qbo-draft-1248"
         },
-        "tax_copy": {
+        "copy": {
           "status": "done",
           "note": null,
           "updated": "2026-06-20T09:36:00-0800",
@@ -1764,7 +1764,7 @@
           "updated": "2026-07-11T14:26:00-0800",
           "ref": "qbo-draft-1249"
         },
-        "tax_copy": {
+        "copy": {
           "status": "done",
           "note": null,
           "updated": "2026-07-11T14:26:00-0800",
@@ -1802,7 +1802,7 @@
           "updated": "2026-07-21T13:02:00-0800",
           "ref": "qbo-draft-1250"
         },
-        "tax_copy": {
+        "copy": {
           "status": "done",
           "note": null,
           "updated": "2026-07-21T13:02:00-0800",
@@ -1842,7 +1842,7 @@
           "updated": "2026-06-18T10:57:00-0800",
           "ref": "qbo-draft-1251"
         },
-        "tax_copy": {
+        "copy": {
           "status": "done",
           "note": null,
           "updated": "2026-06-18T10:57:00-0800",
@@ -1888,7 +1888,7 @@
           "updated": "2026-10-22T10:38:00-0800",
           "ref": "qbo-draft-1252"
         },
-        "tax_copy": {
+        "copy": {
           "status": "done",
           "note": null,
           "updated": "2026-10-22T10:38:00-0800",
@@ -1951,7 +1951,7 @@
       },
       "filed": "2026-06-20T09:35:00-0800",
       "followups": {
-        "tax_copy": {
+        "copy": {
           "status": "done",
           "note": null,
           "updated": "2026-06-20T09:37:00-0800",
@@ -2013,7 +2013,7 @@
           "updated": "2026-08-02T11:07:00-0800",
           "ref": "qbo-draft-1256"
         },
-        "tax_copy": {
+        "copy": {
           "status": "done",
           "note": null,
           "updated": "2026-08-02T11:07:00-0800",
@@ -2051,7 +2051,7 @@
           "updated": "2026-06-20T09:40:00-0800",
           "ref": "qbo-draft-1257"
         },
-        "tax_copy": {
+        "copy": {
           "status": "done",
           "note": null,
           "updated": "2026-06-20T09:40:00-0800",
@@ -2089,7 +2089,7 @@
           "updated": "2026-10-14T14:12:00-0800",
           "ref": "qbo-draft-1258"
         },
-        "tax_copy": {
+        "copy": {
           "status": "done",
           "note": null,
           "updated": "2026-10-14T14:12:00-0800",
@@ -2129,7 +2129,7 @@
           "updated": "2026-08-02T11:03:00-0800",
           "ref": "qbo-draft-1259"
         },
-        "tax_copy": {
+        "copy": {
           "status": "done",
           "note": null,
           "updated": "2026-08-02T11:03:00-0800",
@@ -2175,7 +2175,7 @@
           "updated": "2026-11-07T12:09:00-0800",
           "ref": null
         },
-        "tax_copy": {
+        "copy": {
           "status": "done",
           "note": null,
           "updated": "2026-11-07T12:09:00-0800",
@@ -2295,7 +2295,7 @@
       },
       "filed": "2026-07-11T14:33:00-0800",
       "followups": {
-        "tax_copy": {
+        "copy": {
           "status": "done",
           "note": null,
           "updated": "2026-07-11T14:35:00-0800",
