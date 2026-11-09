@@ -10,6 +10,7 @@ Open-source ScanSnap iX500 document-scanning stack for macOS: SANE-driven bash C
 - **Install:** symlink `bin/*` onto your `PATH` (they already live in `~/bin` on this machine).
 - **Run it:** `scan-batch` scans a mixed stack into local staging; Claude classifies each sheet and writes a manifest; `batch-file` files every document into the Google Drive filing root `~/My Drive/scans/<entity>/<type>/[<YYYY>/]`.
 - **Read side:** `scan-catalog` merges the sidecars into a catalog, lists open follow-ups (Drive copies, QuickBooks drafts, calendar reminders, medical records), and renders the HTML dashboards.
+- **Live dashboard:** `scan-catalog serve` runs a local server on http://127.0.0.1:7820/ with scanner status, batches in progress, and buttons that run the tools (scan, stop, resume, file, diagnose, restart the Brother services).
 - **Diagnose:** `scan-diag` runs every dependency check and prints pass/fail with a fix hint per failure.
 
 ## Overview
@@ -27,6 +28,7 @@ A GUI path (NAPS2) is also documented for point-and-click scanning.
 ## Tech stack
 
 - **bash** — every tool except scan-organize (python3 stdlib), `set -euo pipefail`. No compiled code, no dependencies bundled.
+- **bun** — runs `share/server.ts`, the live dashboard server behind `scan-catalog serve`. Only that command needs it.
 - **SANE / sane-backends** — `scanimage` (acquisition) and `sane-find-scanner` (probe); the `fujitsu` backend drives the iX500 over USB.
 - **img2pdf** — assemble page images into PDFs (the primary assembler).
 - **qpdf** — page-level PDF merge / split / append without re-encoding existing pages.
@@ -87,6 +89,7 @@ scan2pdf taxes                        # raw one-off → ~/My Drive/scans/_inbox/
 - **Registries in the filing root:** `entities.json` (slug, legal name, kind, aliases, notes, `"quickbooks": true`, and `"copies": {"tax": "8328 De Soto Ave/Tax/{year}/Tax Supporting Docs"}` paths relative to the Drive root, `SCAN_DRIVE_ROOT`, default the filing root's parent) and `profiles.json` (users with login accounts, scanners, and per user+scanner profiles carrying a `default_entity`).
 - **Scan defaults:** duplex, color, 300 dpi; flip with `-s` (simplex), `-g` (gray), `-r N` (dpi).
 - **`scan-batch` env vars:** `SCAN_BATCH_SCANIMAGE` (path to `scanimage`), `SCAN_BATCH_POLL_SECS` (paper-sensor poll interval, default 2), plus `--idle N` (end batch after N idle seconds, default 60).
+- **Live server:** `scan-catalog serve --port N` (default 7820), `--no-open`, `--mock` (or `SCAN_SERVE_MOCK=1`: simulated scanners, batches and jobs). It honors `SCAN_ROOT`, `SCAN_STAGING`, `SCAN_DASHBOARD_TEMPLATE`, `SCAN_BATCH_ESCL` and `SCAN_BATCH_SCANIMAGE`. Job logs go to `<staging>/.logs/`, page thumbnails to `<staging>/.thumbs/`.
 - **Who and what:** `scan-batch --user <slug>` (or `SCAN_USER`, or an account match in `profiles.json`) and the detected scanner go into `batch.json` and from there into every sidecar.
 
 ## Scripts / commands
@@ -103,7 +106,7 @@ All live in `bin/` and are symlinked onto `PATH`.
 | `scan-diag` | Diagnostics for the iX500 + SANE stack — colored pass/fail summary with a fix hint per failure. Read-only; safe to run any time. |
 | `scan-batch` | Continuously scan a heterogeneous stack in chunks (paper sensor auto-resumes between chunks; press Enter or wait for `--idle` seconds to end). Pages accumulate as per-page JPEGs in a timestamped staging dir. Exit codes: `0` success · `1` no scanner / device lost / jam · `2` no pages · `64` usage · `66` bad `--resume` dir · `130` interrupted. |
 | `batch-file` | Validate, rotate, merge, rename, and file the staged pages produced by `scan-batch`, driven by `<staging>/manifest.json`. Writes nothing unless every scanned page is accounted for exactly once and every document has an entity. Files entity first, writes sidecars (fields, OCR text, scanner/user provenance, follow-ups), runs the Drive copies `entities.json` maps, writes paydate check reports, appends the per-filer index, refreshes the dashboards. `--no-text-layer`, `--no-dashboard`, `--keep-staging`, `--drive-root DIR`, `-o DIR`. Exit codes: `0` success · `1` validation failure · `2` assembly failure · `64` usage · `66` not a staging dir. |
-| `scan-catalog` | Read side of the filing tree. `build [--entity SLUG]` prints the merged catalog (no OCR text); `pending [WORKFLOW] [--json]` lists open follow-ups (`copy`, `quickbooks`, `calendar`, `vault`, `check_report`); `mark <file> <workflow> <status>` records an outcome in the sidecar; `dashboard [--open]` renders `share/dashboard.html` into the root and each entity folder. |
+| `scan-catalog` | Read side of the filing tree. `build [--entity SLUG]` prints the merged catalog (no OCR text); `pending [WORKFLOW] [--json]` lists open follow-ups (`copy`, `quickbooks`, `calendar`, `vault`, `check_report`); `mark <file> <workflow> <status>` records an outcome in the sidecar; `dashboard [--open]` renders `share/dashboard.html` into the root and each entity folder; `serve [--port N] [--no-open] [--mock]` runs the live dashboard (see below). |
 | `scan-organize` | Split an already-scanned PDF into per-document PDFs from a plan JSON (python3 stdlib); moves the source into `_originals/`. |
 | `escl-scan` | Direct eSCL client for the Brother ADS-4300N through the Push Scan Tool's localhost bridge. |
 
@@ -156,13 +159,26 @@ paper → scanimage (SANE) → page images → img2pdf/qpdf → PDF
 - **Device discovery.** The SANE device name embeds the scanner's serial; tools auto-discover it via `scanimage -L` on each run, so a changed serial only matters for hand-typed commands.
 - **State on disk.** No database — filing state is the filesystem: typed folders, per-document `.json` sidecars, `entities.json`, and an append-only `index.jsonl`.
 
+### Live dashboard server
+
+`share/server.ts` (bun, no dependencies) serves the dashboard template with the catalog and a live config injected, and adds a JSON API the page polls:
+
+- `GET /api/status`: scanners (eSCL `ScannerStatus` via `escl-scan --status` and `pgrep` of the Brother services; `scanimage -L` and `-A` for the iX500; `ioreg` for USB presence; cached 5 s, skipped for a scanner mid-batch), staged batches with their state and allowed actions, and jobs.
+- Batch state comes from the staging dir: a live `.pid` means scanning (`.stop` present: stopping), else `.filed` means filed, else `manifest.json` means ready, else staged.
+- `POST /api/scan`, `/api/batches/<id>/{stop,resume,file,discard,reveal}`, `/api/diag`, `/api/brother/restart`, `/api/dashboard/refresh` start the matching tool as a detached job. The server checks each action against the batch state first. Discard moves the staging dir to `~/.Trash`.
+- `GET /files/<path>` serves PDFs from the filing root only; `GET /api/batches/<id>/thumb/<n>` serves a `sips` thumbnail.
+- Local only: it binds 127.0.0.1, refuses other Host headers (DNS rebinding) and cross-origin POSTs, and every POST must carry the per-launch token the page embeds.
+
+The static `dashboard.html` copies in Drive keep their no-network CSP. Their live block is `null`, so they show the scanner list and a link to the live page.
+
 ### Repo layout
 
 ```
 bin/                        # the CLI tools (symlinked into ~/bin)
 share/dashboard.html        # dashboard template scan-catalog renders
+share/server.ts             # live dashboard server (scan-catalog serve)
 docs/                       # device-options.txt (full scanimage dump), superpowers/ plans & specs
-test/                       # bats suites + stubs/ (fake scanimage) — scan-batch, batch-file, checks-normalize
+test/                       # bats suites + stubs/ (fake scanimage): scan-batch, batch-file, checks-normalize, scan-catalog, serve
 ENVIRONMENT.md              # machine + scanner baseline recorded at preflight
 PRD-ix500-mac-scanning.md   # original product requirements
 TROUBLESHOOTING.md          # failure modes and fixes
@@ -170,4 +186,4 @@ TROUBLESHOOTING.md          # failure modes and fixes
 
 ## Status
 
-In active use for document, paycheck, and mixed-batch scanning. The check workflow (scan → manifest → split → normalize → report) and the mixed-batch workflow (`scan-batch` + `batch-file`) both shipped 2026-06-11; per-check normalization inside `checks-split` and the entity registry landed 2026-06-12. Dev-only `bats` suites cover `batch-file` (24 tests), `scan-batch` (8), and `checks-normalize` (8) — run with `bats test/`. macOS + iX500 specific; validated on the single machine recorded in `ENVIRONMENT.md`.
+In active use for document, paycheck, and mixed-batch scanning. The check workflow (scan → manifest → split → normalize → report) and the mixed-batch workflow (`scan-batch` + `batch-file`) both shipped 2026-06-11; per-check normalization inside `checks-split` and the entity registry landed 2026-06-12. Dev-only `bats` suites cover `batch-file`, `scan-batch`, `checks-normalize`, `scan-catalog` and the live server (65 tests). Run them with `bats test/`. macOS + iX500 specific; validated on the single machine recorded in `ENVIRONMENT.md`.
