@@ -5,7 +5,8 @@
  * Serves share/dashboard.html with the catalog and a live config injected,
  * reports scanner state and staged batches as JSON, and runs the scan-it
  * tools (scan-batch, batch-file, scan-diag, scan-catalog) as background jobs
- * when a dashboard button asks.
+ * when a dashboard button asks. With auto-scan on, it also watches the
+ * Brother's paper sensor and starts scan-batch itself when paper lands.
  *
  * Local only: it binds 127.0.0.1, refuses any Host header other than its own
  * (DNS rebinding), and every POST must carry the per-launch token embedded in
@@ -23,7 +24,7 @@ import {
   readFileSync, renameSync, rmSync, statSync, writeFileSync,
 } from "node:fs";
 import { homedir, hostname } from "node:os";
-import { join, resolve, sep } from "node:path";
+import { dirname, join, resolve, sep } from "node:path";
 
 // ---------- types ----------
 
@@ -34,6 +35,29 @@ type JobKind = "scan" | "resume" | "file" | "diag" | "refresh" | "restart-servic
 type JobState = "running" | "done" | "failed";
 
 interface Service { name: string; running: boolean }
+
+/** Auto-scan: the server starts a batch by itself when paper lands in the feeder. */
+interface AutoSettings {
+  enabled: boolean;
+  /** Who the batches are recorded as. Nobody picks a name when paper just lands. */
+  user: string;
+  duplex: boolean;
+  gray: boolean;
+  /** Seconds without paper before a batch ends. The next feed starts a new one. */
+  idle: number;
+}
+
+/**
+ * off: scans start from the Scan button only. watching: paper in the feeder
+ * starts a batch. scanning: a batch is running. holding: paper is in the
+ * feeder but a batch already ended with it there (stopped, jammed, failed), so
+ * it has to come out before the next feed counts. waiting: the scanner can't
+ * scan right now.
+ */
+type AutoPhase = "off" | "watching" | "scanning" | "holding" | "waiting";
+type AutoStatus = AutoSettings & { phase: AutoPhase };
+/** What the watcher last read from the feeder. */
+type AutoSeen = "empty" | "loaded" | "not-ready" | null;
 
 interface Scanner {
   slug: string;
@@ -46,6 +70,8 @@ interface Scanner {
   paper: boolean | null;
   services: Service[] | null;
   batch: string | null;
+  /** null: this scanner has no auto-scan. */
+  auto: AutoStatus | null;
   actions: string[];
   checked: string;
 }
@@ -60,6 +86,8 @@ interface Batch {
   scanner: string | null;
   user: string | null;
   default_entity: string | null;
+  /** Auto-scan started it, so nobody chose the user. */
+  auto: boolean;
   mode: string | null;
   duplex: boolean;
   resolution: number | null;
@@ -93,6 +121,8 @@ interface ScanRequest {
   duplex: boolean;
   gray: boolean;
   idle: number;
+  /** Started by the auto-scan watcher instead of the Scan button. */
+  auto?: boolean;
 }
 
 /** What the HTTP layer needs; RealBackend drives the tools, MockBackend simulates them. */
@@ -102,6 +132,8 @@ interface Backend {
   jobs(): Job[];
   jobOutput(id: string): string | null;
   scan(req: ScanRequest): Job;
+  autoSettings(slug: string): AutoSettings;
+  setAuto(slug: string, s: AutoSettings): void;
   stop(b: Batch): void;
   resume(b: Batch, idle: number): Job;
   file(b: Batch): Job;
@@ -196,6 +228,18 @@ const MAC = process.platform === "darwin";
 // and "restart" (restarts ipp-usb). Unset, ipp-usb is looked for here.
 const SCANNER_HOST = process.env.SCAN_SCANNER_HOST || null;
 const SSH_QUICK = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5"];
+// Auto-scan needs a paper sensor that is cheap to read every few seconds. The
+// Brother's is one eSCL status request. The iX500's is a full SANE option dump
+// over a USB link that drops under load, so it has none.
+const AUTO_SCANNERS = ["brother"];
+// Settings per scanner slug. Read on every look, so a hand edit takes effect
+// without a restart.
+const AUTO_FILE = process.env.SCAN_AUTO_FILE ??
+  join(process.env.XDG_CONFIG_HOME || join(HOME, ".config"), "scan-it", "auto.json");
+const AUTO_POLL_MS = (() => {
+  const n = Number(process.env.SCAN_AUTO_POLL_SECS ?? "3");
+  return Number.isFinite(n) && n >= 0.2 ? Math.round(n * 1000) : 3000;
+})();
 const ORIGINS = [`http://127.0.0.1:${OPTS.port}`, `http://localhost:${OPTS.port}`];
 const HOSTS = [`127.0.0.1:${OPTS.port}`, `localhost:${OPTS.port}`];
 
@@ -385,6 +429,37 @@ function defaultUser(): string {
   return login.toLowerCase().replace(/[^a-z0-9-]/g, "-");
 }
 
+const USER_SLUG = /^[a-z0-9][a-z0-9-]*$/;
+
+function idleOf(v: unknown): number {
+  const n = typeof v === "number" ? v : Number(v);
+  return Number.isFinite(n) ? Math.min(3600, Math.max(10, Math.round(n))) : 60;
+}
+
+/** One scanner's auto-scan settings out of whatever the file holds. Off unless it says on. */
+function autoFrom(v: unknown): AutoSettings {
+  const rec = isRecord(v) ? v : {};
+  const user = str(rec.user);
+  return {
+    enabled: rec.enabled === true,
+    user: user !== null && USER_SLUG.test(user) ? user : defaultUser(),
+    duplex: rec.duplex !== false,
+    gray: rec.gray === true,
+    idle: rec.idle === undefined ? 60 : idleOf(rec.idle),
+  };
+}
+
+function autoPhase(cfg: AutoSettings, scanning: boolean, seen: AutoSeen, armed: boolean): AutoPhase {
+  if (!cfg.enabled) return "off";
+  if (scanning) return "scanning";
+  if (seen === "not-ready") return "waiting";
+  return seen === "loaded" && !armed ? "holding" : "watching";
+}
+
+function scanningOn(slug: string, batches: Batch[]): boolean {
+  return batches.some((b) => b.scanner === slug && (b.state === "scanning" || b.state === "stopping"));
+}
+
 /** A scanner card reflects a batch scanning on it, whatever the last probe said. */
 function overlayBusy(list: Scanner[], batches: Batch[]): Scanner[] {
   return list.map((s) => {
@@ -462,6 +537,112 @@ class RealBackend implements Backend {
     this.gen++;
     this.cache.at = 0;
     this.probing = null;
+  }
+
+  // Auto-scan, per scanner slug. armed: the next paper seen starts a batch.
+  // It drops when a batch runs, so paper left behind by a stopped, jammed or
+  // failed batch can't start batch after batch. It comes back when the feeder
+  // is seen empty, or when the batch (the one last seen scanning) ended by its
+  // idle timeout, which means scan-batch's own last look found it empty.
+  private watch = new Map<string, { armed: boolean; seen: AutoSeen; batch: string | null }>();
+  // The scan job last started per scanner. Until its staging dir shows up as
+  // a scanning batch, a second start on that scanner is refused.
+  private launched = new Map<string, string>();
+  private looking = false;
+
+  constructor() {
+    setInterval(() => void this.autoLook(), AUTO_POLL_MS);
+    void this.autoLook();
+  }
+
+  private watchOf(slug: string) {
+    let w = this.watch.get(slug);
+    if (!w) { w = { armed: true, seen: null, batch: null }; this.watch.set(slug, w); }
+    return w;
+  }
+
+  /** A batch is scanning on the scanner, or about to: the watcher stands down. */
+  private autoOwned(slug: string): boolean {
+    const w = this.watchOf(slug);
+    const b = this.batches().find((x) => x.scanner === slug && (x.state === "scanning" || x.state === "stopping"));
+    if (!b && !this.launching(slug)) return false;
+    w.armed = false;
+    w.seen = null;
+    if (b) w.batch = b.id;
+    return true;
+  }
+
+  /** A scan started here that has not created its staging dir yet. */
+  private launching(slug: string): boolean {
+    const id = this.launched.get(slug);
+    if (id === undefined) return false;
+    return this.jobs().some((j) => j.id === id && j.state === "running" && j.batch === null);
+  }
+
+  autoSettings(slug: string): AutoSettings {
+    return autoFrom(readJson(AUTO_FILE)?.[slug]);
+  }
+
+  setAuto(slug: string, s: AutoSettings): void {
+    const all = readJson(AUTO_FILE) ?? {};
+    all[slug] = s;
+    mkdirSync(dirname(AUTO_FILE), { recursive: true });
+    writeFileSync(`${AUTO_FILE}.tmp`, `${JSON.stringify(all, null, 2)}\n`);
+    renameSync(`${AUTO_FILE}.tmp`, AUTO_FILE);
+    void this.autoLook();
+  }
+
+  private autoStatus(slug: string, batches: Batch[]): AutoStatus | null {
+    if (!AUTO_SCANNERS.includes(slug)) return null;
+    const cfg = this.autoSettings(slug);
+    const w = this.watchOf(slug);
+    return { ...cfg, phase: autoPhase(cfg, scanningOn(slug, batches) || this.launching(slug), w.seen, w.armed) };
+  }
+
+  /** One pass of the watcher over every scanner that has auto-scan. */
+  private async autoLook(): Promise<void> {
+    if (this.looking) return;
+    this.looking = true;
+    try {
+      for (const def of scannerDefs()) {
+        if (AUTO_SCANNERS.includes(def.slug)) await this.autoCheck(def);
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      this.looking = false;
+    }
+  }
+
+  private async autoCheck(def: ScannerDef): Promise<void> {
+    const w = this.watchOf(def.slug);
+    // Off: nothing is probed. Paper already waiting when it is switched on counts as a feed.
+    const off = () => { w.armed = true; w.seen = null; w.batch = null; };
+    if (!this.autoSettings(def.slug).enabled) return off();
+    // scan-batch reads the sensor itself while it runs; a second reader adds nothing.
+    if (this.autoOwned(def.slug)) return;
+    // A restart or Diagnose has the scanner for a moment.
+    if (this.jobList.some((j) => j.state === "running" && (j.kind === "restart-services" || j.kind === "diag"))) return;
+    const st = await run([ESCL, "--status"], 6000);
+    // Everything below runs without another await, so a Scan click that got in
+    // during the probe is seen here and the two can't both start.
+    const cfg = this.autoSettings(def.slug);
+    if (!cfg.enabled) return off();
+    if (this.autoOwned(def.slug)) return;
+    if (w.batch !== null) {
+      if (readJson(join(STAGING, w.batch, "batch.json"))?.ended === "idle") w.armed = true;
+      w.batch = null;
+    }
+    const m = /State=(\S+) Adf=(\S+)/.exec(st.out);
+    if (!m || m[1] !== "Idle") { w.seen = "not-ready"; return; }
+    if (/Empty/i.test(m[2])) { w.seen = "empty"; w.armed = true; return; }
+    // Jam, open cover, or a state this code doesn't know: not a feed.
+    if (!/AdfLoaded/i.test(m[2])) { w.seen = "not-ready"; return; }
+    w.seen = "loaded";
+    if (!w.armed) return;
+    w.armed = false;
+    console.log(`auto-scan: paper in the ${def.model}, starting a batch as ${cfg.user}`);
+    this.scan({ scanner: def, user: cfg.user, duplex: cfg.duplex, gray: cfg.gray, idle: cfg.idle, auto: true });
   }
 
   jobs(): Job[] {
@@ -570,6 +751,7 @@ class RealBackend implements Backend {
       scanner: str(meta.scanner),
       user: str(meta.user),
       default_entity: str(meta.default_entity),
+      auto: meta.auto === true,
       mode: str(meta.mode),
       duplex,
       resolution: typeof meta.resolution === "number" ? meta.resolution : null,
@@ -600,7 +782,7 @@ class RealBackend implements Backend {
       if (force || this.cache.at === 0) await this.probing;
     }
     const list = defs.map((d) => this.cache.data.get(d.slug) ?? unknownScanner(d));
-    return overlayBusy(list, batches);
+    return overlayBusy(list, batches).map((s) => ({ ...s, auto: this.autoStatus(s.slug, batches) }));
   }
 
   private async probeAll(defs: ScannerDef[], busy: Set<string>): Promise<Map<string, Scanner>> {
@@ -641,7 +823,7 @@ class RealBackend implements Backend {
     const m = /State=(\S+) Adf=(\S+) Endpoint=(\S+)/.exec(st.out);
     const base: Scanner = {
       slug: d.slug, model: d.model, where: d.where, present: false, connection: onUsb ? "usb" : null,
-      state: "offline", detail: "", paper: null, services, batch: null,
+      state: "offline", detail: "", paper: null, services, batch: null, auto: null,
       actions: ["diag", "restart-services"], checked: now(),
     };
     if (!m) {
@@ -689,7 +871,7 @@ class RealBackend implements Backend {
     const base: Scanner = {
       slug: d.slug, model: d.model, where: d.where, present: false, connection: null,
       state: "offline", detail: `Not connected to ${MAC ? "this Mac" : HOST}. It is USB only, and the lid is its power switch.`,
-      paper: null, services: null, batch: null, actions: ["diag"], checked: now(),
+      paper: null, services: null, batch: null, auto: null, actions: ["diag"], checked: now(),
     };
     if (!/ScanSnap|04c5:132b/i.test(usbText)) return base;
     const list = await run([SCANIMAGE, "-L"], 12000);
@@ -710,10 +892,18 @@ class RealBackend implements Backend {
   }
 
   scan(r: ScanRequest): Job {
+    // Two starts a moment apart (two people, or a click racing the auto-scan
+    // watcher) would both pass the caller's check of the scanner's state.
+    if (this.launching(r.scanner.slug)) {
+      throw new HttpError(409, `A scan is already starting on the ${r.scanner.model}. Its batch shows up in a few seconds.`);
+    }
     const cmd = [tool("scan-batch"), "--scanner", r.scanner.slug, "--user", r.user, "--idle", String(r.idle)];
     if (!r.duplex) cmd.push("--simplex");
     if (r.gray) cmd.push("--gray");
-    return this.start("scan", `Scan on ${r.scanner.model} as ${r.user}`, cmd);
+    if (r.auto) cmd.push("--auto-started");
+    const job = this.start("scan", `${r.auto ? "Auto-scan" : "Scan"} on ${r.scanner.model} as ${r.user}`, cmd);
+    this.launched.set(r.scanner.slug, job.id);
+    return job;
   }
 
   stop(b: Batch): void {
@@ -813,7 +1003,7 @@ function unknownScanner(d: ScannerDef): Scanner {
   return {
     slug: d.slug, model: d.model, where: d.where, present: false, connection: null,
     state: "unknown", detail: "No live check for this scanner yet.", paper: null,
-    services: null, batch: null, actions: ["diag"], checked: now(),
+    services: null, batch: null, auto: null, actions: ["diag"], checked: now(),
   };
 }
 
@@ -835,6 +1025,7 @@ interface MockBatch {
   scanner: string;
   user: string;
   default_entity: string | null;
+  auto?: boolean;
   duplex: boolean;
   gray: boolean;
   documents: number | null;
@@ -857,6 +1048,10 @@ class MockBackend implements Backend {
   private jobList: MockJob[] = [];
   private seq = 0;
   private paperFlip = 0;
+  // Auto-scan lives in memory here: a mock never writes the real settings file.
+  private autoCfg = new Map<string, AutoSettings>();
+  private autoArmed = true;
+  private autoSeen: AutoSeen = null;
 
   constructor() {
     const t = Date.now();
@@ -946,7 +1141,7 @@ class MockBackend implements Backend {
         return {
           id: b.id, dir: this.dir(b.id), state: b.state, pages: b.pages,
           started: new Date(b.started).toISOString(), updated: new Date(b.updated).toISOString(),
-          scanner: b.scanner, user: b.user, default_entity: b.default_entity,
+          scanner: b.scanner, user: b.user, default_entity: b.default_entity, auto: b.auto === true,
           mode: b.gray ? "Gray" : "Color", duplex: b.duplex, resolution: 300,
           documents: b.documents, review_items: b.review_items,
           odd_pages: b.duplex && b.pages % 2 === 1 && b.state !== "scanning",
@@ -960,23 +1155,51 @@ class MockBackend implements Backend {
 
   async scanners(defs: ScannerDef[], batches: Batch[]): Promise<Scanner[]> {
     this.paperFlip++;
+    // The mock feeder holds paper for eight polls, then sits empty for four.
+    const paper = Math.floor(this.paperFlip / 4) % 3 !== 2;
+    let current = batches;
+    const brother = defs.find((d) => d.slug === "brother");
+    if (brother) {
+      // The same rule as the real watcher: one batch per feed.
+      const cfg = this.autoSettings("brother");
+      if (!cfg.enabled) { this.autoArmed = true; this.autoSeen = null; }
+      else if (scanningOn("brother", current)) { this.autoArmed = false; this.autoSeen = null; }
+      else if (!paper) { this.autoArmed = true; this.autoSeen = "empty"; }
+      else {
+        this.autoSeen = "loaded";
+        if (this.autoArmed) {
+          this.autoArmed = false;
+          this.scan({ scanner: brother, user: cfg.user, duplex: cfg.duplex, gray: cfg.gray, idle: cfg.idle, auto: true });
+          current = this.batches();
+        }
+      }
+    }
     const list = defs.map((d): Scanner => {
       const checked = now();
       if (d.slug === "brother") {
-        const paper = Math.floor(this.paperFlip / 4) % 3 !== 2;
+        const cfg = this.autoSettings(d.slug);
         return { slug: d.slug, model: d.model, where: d.where, present: true, connection: "usb",
           state: "idle", paper, detail: paper ? "Ready. Paper is in the feeder." : "Ready. The feeder is empty.",
           services: BROTHER_SERVICES.map((name) => ({ name, running: true })), batch: null,
+          auto: { ...cfg, phase: autoPhase(cfg, scanningOn(d.slug, current), this.autoSeen, this.autoArmed) },
           actions: ["scan", "diag", "restart-services"], checked };
       }
       if (d.slug === "ix500") {
         return { slug: d.slug, model: d.model, where: d.where, present: false, connection: null,
-          state: "offline", paper: null, services: null, batch: null, actions: ["diag"], checked,
+          state: "offline", paper: null, services: null, batch: null, auto: null, actions: ["diag"], checked,
           detail: "Not connected to this Mac. It is USB only, and the lid is its power switch." };
       }
       return unknownScanner(d);
     });
-    return overlayBusy(list, batches);
+    return overlayBusy(list, current);
+  }
+
+  autoSettings(slug: string): AutoSettings {
+    return this.autoCfg.get(slug) ?? autoFrom(null);
+  }
+
+  setAuto(slug: string, s: AutoSettings): void {
+    this.autoCfg.set(slug, s);
   }
 
   scan(r: ScanRequest): Job {
@@ -986,11 +1209,12 @@ class MockBackend implements Backend {
     const b: MockBatch = {
       id, state: "scanning", pages: 0, target: r.duplex ? 16 : 8, started: Date.now(), updated: Date.now(),
       scanner: r.scanner.slug, user: r.user, default_entity: r.user === "ariel" ? "rio-laundromat" : r.user === "elsa" ? "personal" : null,
+      auto: r.auto === true,
       duplex: r.duplex, gray: r.gray, documents: null, review_items: null, stoppedAt: null, job: null,
     };
     this.list.unshift(b);
     const header = `Batch ${id} (${r.duplex ? "ADF Duplex" : "ADF Front"}, ${r.gray ? "Gray" : "Color"}, 300dpi) for ${r.user} on ${r.scanner.slug}`;
-    return this.add("scan", `Scan on ${r.scanner.model} as ${r.user}`, [], 0, {
+    return this.add("scan", `${r.auto ? "Auto-scan" : "Scan"} on ${r.scanner.model} as ${r.user}`, [], 0, {
       batch: id,
       live: () => this.scanLines(b, header),
     });
@@ -1169,9 +1393,13 @@ async function body(req: Request): Promise<Record<string, unknown>> {
   }
 }
 
-function idleOf(v: unknown): number {
-  const n = typeof v === "number" ? v : Number(v);
-  return Number.isFinite(n) ? Math.min(3600, Math.max(10, Math.round(n))) : 60;
+/** The slug of someone who may be recorded as the person at the scanner. */
+function userOf(v: unknown): string {
+  const user = str(v) ?? defaultUser();
+  if (!USER_SLUG.test(user)) throw new HttpError(400, "The user must be a lowercase slug.");
+  const known = userSlugs();
+  if (known.length && !known.includes(user)) throw new HttpError(400, `${user} is not in profiles.json.`);
+  return user;
 }
 
 function findBatch(id: string): Batch {
@@ -1271,15 +1499,31 @@ async function handle(req: Request, remote: Remote | null): Promise<Response> {
     const slug = str(b.scanner);
     const def = scannerDefs().find((d) => d.slug === slug);
     if (!def) throw new HttpError(400, "Pick a scanner.");
-    const user = str(b.user) ?? defaultUser();
-    if (!/^[a-z0-9][a-z0-9-]*$/.test(user)) throw new HttpError(400, "The user must be a lowercase slug.");
-    const known = userSlugs();
-    if (known.length && !known.includes(user)) throw new HttpError(400, `${user} is not in profiles.json.`);
+    const user = userOf(b.user);
     const s = (await status(true)).scanners.find((x) => x.slug === def.slug);
     if (s?.state === "scanning") throw new HttpError(409, `The ${def.model} is already scanning ${s.batch}.`);
     if (!s?.actions.includes("scan")) throw new HttpError(409, `The ${def.model} isn't ready. ${s?.detail ?? ""}`.trim());
     const job = backend.scan({ scanner: def, user, duplex: b.duplex !== false, gray: b.gray === true, idle: idleOf(b.idle) });
     return json({ job: job.id });
+  }
+
+  // Auto-scan on or off, and the settings its batches use. Fields left out keep their value.
+  if (path === "/api/auto") {
+    const def = scannerDefs().find((d) => d.slug === str(b.scanner));
+    if (!def) throw new HttpError(400, "Pick a scanner.");
+    if (!AUTO_SCANNERS.includes(def.slug)) {
+      throw new HttpError(409, `Auto-scan works on the Brother only. The ${def.model} has no paper sensor this server can watch.`);
+    }
+    const cur = backend.autoSettings(def.slug);
+    const next: AutoSettings = {
+      enabled: typeof b.enabled === "boolean" ? b.enabled : cur.enabled,
+      user: b.user === undefined ? cur.user : userOf(b.user),
+      duplex: typeof b.duplex === "boolean" ? b.duplex : cur.duplex,
+      gray: typeof b.gray === "boolean" ? b.gray : cur.gray,
+      idle: b.idle === undefined ? cur.idle : idleOf(b.idle),
+    };
+    backend.setAuto(def.slug, next);
+    return json({ auto: next });
   }
 
   let m = /^\/api\/batches\/([A-Za-z0-9._-]+)\/(stop|resume|file|discard|reveal)$/.exec(path);

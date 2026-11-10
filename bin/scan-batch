@@ -39,6 +39,9 @@ Options:
   -u, --user SLUG      who is scanning (default: $SCAN_USER, else the account
                        match in profiles.json, else the login name)
   --resume DIR         continue an interrupted batch staging dir
+      --auto-started   the dashboard's auto-scan started this batch, not a
+                       person: batch.json records "auto": true, and the user
+                       is the auto-scan setting, not someone who picked a name
       --scanner WHICH  brother | ix500 | auto (default: auto — Brother first;
                        env SCAN_SCANNER sets the default)
   -x, --scanopt ARG    iX500 only: extra option passed through to scanimage
@@ -60,6 +63,7 @@ outparent="${SCAN_STAGING:-$HOME/.cache/scan-it/batches}"
 scan_root="${SCAN_ROOT:-$HOME/My Drive/scans}"
 user_opt=""
 resume_dir=""
+auto_started="false"
 scanner="${SCAN_SCANNER:-auto}"
 scanopts=()
 
@@ -85,6 +89,7 @@ while [[ $# -gt 0 ]]; do
       [[ $# -ge 2 ]] || { echo "scan-batch: $1 requires a value" >&2; exit 64; }
       [[ "$2" =~ ^[a-z0-9][a-z0-9-]*$ ]] || { echo "scan-batch: $1 must be a lowercase slug" >&2; exit 64; }
       user_opt="$2"; shift ;;
+    --auto-started) auto_started="true" ;;
     --scanner)
       [[ $# -ge 2 ]] || { echo "scan-batch: $1 requires a value" >&2; exit 64; }
       scanner="$2"; shift ;;
@@ -181,6 +186,10 @@ if [[ -n "$resume_dir" ]]; then
   [[ -d "$staging/pages" ]] || { echo "scan-batch: not a batch staging dir: $resume_dir" >&2; exit 66; }
   batch_id=$(basename "$staging")
   started=$(jq -r '.started // empty' "$staging/batch.json" 2>/dev/null || true)
+  # A resumed batch stays an auto-scan batch: its first pages came that way.
+  if [[ "$(jq -r '.auto // false' "$staging/batch.json" 2>/dev/null || true)" == "true" ]]; then
+    auto_started="true"
+  fi
 else
   batch_id="batch-$(date +%Y%m%d-%H%M%S)"
   staging="$outparent/$batch_id"
@@ -194,6 +203,13 @@ page_count() { find "$staging/pages" -name 'page-*.jpg' | wc -l | tr -d ' '; }
 # chunks in batch.json records this run only — a resumed batch does not
 # re-derive earlier chunk boundaries.
 chunk_counts=""   # space-separated page count per chunk this run
+
+# Why this run ended, for batch.json: idle (no paper for --idle seconds, so the
+# feeder was empty at the last look), stop (.stop or Enter), jam, lost (the
+# scanner went away), interrupted (Ctrl-C). Empty while it runs. The
+# dashboard's auto-scan reads it: after idle, paper in the feeder is a new
+# feed; after anything else it may be what this batch left behind.
+ended=""
 
 # Pages escl-scan's integrity check found damaged mid-page (pages/.damaged),
 # as a JSON array of staging-relative paths.
@@ -211,14 +227,17 @@ write_batch_json() {
         --arg source "$source_opt" --arg mode "$mode" \
         --argjson resolution "$resolution" \
         --argjson pages "$(page_count)" --argjson chunks "$arr" \
-        --argjson damaged "$(damaged_json)" \
+        --argjson damaged "$(damaged_json)" --argjson auto "$auto_started" \
+        --arg ended "$ended" \
         --arg scanner "$scanner_slug" --arg device "$device" \
         --arg user "$scan_user" --arg host "$host" --arg entity "$default_entity" \
     '{batch: $id, started: $started, updated: $updated, source: $source,
       mode: $mode, resolution: $resolution, pages: $pages, chunks: $chunks,
       damaged: $damaged,
       scanner: $scanner, device: $device, user: $user, host: $host,
-      default_entity: (if $entity == "" then null else $entity end)}' \
+      default_entity: (if $entity == "" then null else $entity end),
+      ended: (if $ended == "" then null else $ended end)}
+     + (if $auto then {auto: true} else {} end)' \
     > "$staging/batch.json"
 }
 
@@ -239,6 +258,7 @@ ensure_device() {
     if discover_scanner; then return 0; fi
     tries=$((tries + 1))
     if (( tries >= 3 )); then
+      ended="lost"
       write_batch_json
       echo "scan-batch: scanner disappeared mid-batch (USB?). Staging preserved." >&2
       echo "  Resume with: scan-batch --resume $staging" >&2
@@ -273,6 +293,7 @@ scan_chunk() {
 }
 
 on_interrupt() {
+  ended="interrupted"
   write_batch_json
   echo ""
   echo "scan-batch: interrupted — staging preserved: $staging"
@@ -281,9 +302,10 @@ on_interrupt() {
 }
 trap on_interrupt INT
 
-finish() {
+finish() { # <why: idle | stop>
   local total
   total=$(page_count)
+  ended="$1"
   write_batch_json
   if (( total == 0 )); then
     [[ -n "$resume_dir" ]] || rm -rf "$staging"
@@ -309,10 +331,10 @@ finish() {
 wait_for_paper() {
   local waited=0
   while (( waited < idle )); do
-    if stop_requested; then finish; fi
+    if stop_requested; then finish stop; fi
     if [[ -t 0 ]]; then
       # read doubles as the poll sleep and the Enter-to-end check.
-      if read -r -s -t "$poll_secs"; then finish; fi
+      if read -r -s -t "$poll_secs"; then finish stop; fi
     else
       sleep "$poll_secs"
     fi
@@ -320,7 +342,7 @@ wait_for_paper() {
     if page_loaded; then return 0; fi
     ensure_device
   done
-  finish
+  finish idle
 }
 
 # .pid marks the batch as scanning for scan-catalog serve; a .stop file (the
@@ -333,12 +355,13 @@ write_batch_json
 stop_requested() { [[ -f "$staging/.stop" ]] && echo "Stop requested."; }
 
 echo "Batch $batch_id ($source_opt, $mode, ${resolution}dpi) — $scan_user on $scanner_slug${default_entity:+, default entity $default_entity}"
+[[ "$auto_started" != "true" ]] || echo "Started by auto-scan: paper landed in the feeder."
 echo "Feed the ADF. Enter ends the batch (or the dashboard's Stop); idle timeout ${idle}s."
 
 zero_scans=0   # consecutive scans where the sensor saw paper but 0 pages fed
 
 while :; do
-  if stop_requested; then finish; fi
+  if stop_requested; then finish stop; fi
   if page_loaded; then
     before=$(page_count)
     scan_chunk
@@ -353,6 +376,7 @@ while :; do
       # or device trouble
       zero_scans=$(( zero_scans + 1 ))
       if (( zero_scans >= 3 )); then
+        ended="jam"
         write_batch_json
         echo "scan-batch: paper detected but nothing feeding (jam or misfeed?). Staging preserved." >&2
         echo "  Re-seat the stack, then resume with: scan-batch --resume $staging" >&2

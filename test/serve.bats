@@ -24,6 +24,11 @@ echo "State=Idle Adf=ScannerAdfLoaded Endpoint=http://localhost:60000/eSCL"
 SH
   chmod +x "$TMP/escl"
   export SCAN_BATCH_ESCL="$TMP/escl"
+  # Auto-scan: its settings stay in the scratch dir, and the watcher and
+  # scan-batch poll fast enough for a test.
+  export SCAN_AUTO_FILE="$TMP/auto.json"
+  export SCAN_AUTO_POLL_SECS=0.3
+  export SCAN_BATCH_POLL_SECS=1
   export SCANIMAGE_STUB_DIR="$TMP/stub"
   mkdir -p "$SCANIMAGE_STUB_DIR"
   export SCAN_BATCH_SCANIMAGE="$BATS_TEST_DIRNAME/stubs/scanimage"
@@ -406,4 +411,184 @@ JSON
   [[ "$output" == *"already being filed"* ]]
   [ -d "$STAGING/$r/.filing" ]
   [ ! -e "$ROOT/_review/review-$r-01.pdf" ]
+}
+
+# A Brother whose feeder the test loads and empties: the file adf beside the
+# stub holds Loaded or Empty. A scan writes two pages and empties the feeder.
+# adf-status, when present, is what --status alone reports: paper the watcher
+# sees and scan-batch's own sensor check doesn't, as when it lands between the
+# two.
+fake_brother() {
+  echo "${1:-Empty}" > "$TMP/adf"
+  cat > "$TMP/escl" <<'SH'
+#!/bin/sh
+dir=$(dirname "$0")
+adf=$(cat "$dir/adf" 2>/dev/null || echo Empty)
+out="" start=1
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --discover) echo "http://localhost:60000/eSCL"; exit 0 ;;
+    --status) echo "State=Idle Adf=ScannerAdf$(cat "$dir/adf-status" 2>/dev/null || echo "$adf") Endpoint=http://localhost:60000/eSCL"; exit 0 ;;
+    --page-loaded) [ "$adf" = Loaded ]; exit $? ;;
+    -o) out="$2"; shift ;;
+    --start) start="$2"; shift ;;
+  esac
+  shift
+done
+[ -n "$out" ] || exit 64
+[ "$adf" = Loaded ] || exit 2
+for n in "$start" $((start + 1)); do printf 'JPEG' > "$out/$(printf 'page-%03d.jpg' "$n")"; done
+echo Empty > "$dir/adf"
+echo "2 page(s) -> $out"
+SH
+  chmod +x "$TMP/escl"
+}
+
+auto_of() { curl -fs "$URL/api/status" | jq -r ".scanners[] | select(.slug == \"brother\") | .auto.$1"; }
+auto_batches() { # staging dirs that auto-scan started, oldest first
+  local f
+  for f in "$STAGING"/batch-*/batch.json; do
+    [ "$(jq -r '.auto // false' "$f" 2>/dev/null)" = "true" ] && basename "$(dirname "$f")"
+  done
+  return 0
+}
+wait_until() { # <tries of 0.2 s> <command...>
+  local n="$1"; shift
+  for _ in $(seq 1 "$n"); do "$@" && return 0; sleep 0.2; done
+  return 1
+}
+auto_count_is() { [ "$(auto_batches | wc -l | tr -d ' ')" = "$1" ]; }
+auto_phase_is() { [ "$(auto_of phase)" = "$1" ]; }
+batch_state_is() { [ "$(curl -fs "$URL/api/status" | jq -r ".batches[] | select(.id == \"$1\") | .state")" = "$2" ]; }
+
+@test "auto-scan is off until someone turns it on, and its settings persist" {
+  fake_brother Loaded
+  [ "$(auto_of enabled)" = "false" ]
+  [ "$(auto_of phase)" = "off" ]
+  [ "$(curl -fs "$URL/api/status" | jq -r '.scanners[] | select(.slug == "ix500") | .auto')" = "null" ]
+  # Off means off: paper in the feeder starts nothing.
+  sleep 1.5
+  auto_count_is 0
+  [ ! -e "$TMP/auto.json" ]
+
+  run post /api/auto '{"scanner":"brother","user":"eric","duplex":false,"gray":true,"idle":120}'
+  [ "${lines[1]}" = "200" ]
+  [ "$(jq -c .brother "$TMP/auto.json")" = '{"enabled":false,"user":"eric","duplex":false,"gray":true,"idle":120}' ]
+  [ "$(auto_of idle)" = "120" ]
+  # Fields left out keep their value.
+  run post /api/auto '{"scanner":"brother","duplex":true}'
+  [ "$(jq -c '.brother | [.duplex, .gray, .idle]' "$TMP/auto.json")" = '[true,true,120]' ]
+
+  run post /api/auto '{"scanner":"ix500","enabled":true}'
+  [ "${lines[1]}" = "409" ]
+  [[ "${lines[0]}" == *"Brother only"* ]]
+  run post /api/auto '{"scanner":"brother","user":"nobody"}'
+  [ "${lines[1]}" = "400" ]
+  run post /api/auto '{"scanner":"nope","enabled":true}'
+  [ "${lines[1]}" = "400" ]
+  run curl -s -o /dev/null -w '%{http_code}' -X POST -d '{"scanner":"brother","enabled":true}' "$URL/api/auto"
+  [ "$output" = "403" ]
+  [ "$(jq -r .brother.enabled "$TMP/auto.json")" = "false" ]
+}
+
+@test "auto-scan starts one batch per feed, and holds while leftover paper sits in the feeder" {
+  fake_brother Empty
+  run post /api/auto '{"scanner":"brother","enabled":true,"user":"eric","idle":10}'
+  [ "${lines[1]}" = "200" ]
+  wait_until 25 auto_phase_is watching
+  sleep 1
+  auto_count_is 0
+
+  # Paper lands: a batch starts by itself, recorded as the auto-scan user.
+  echo Loaded > "$TMP/adf"
+  wait_until 50 auto_count_is 1
+  first=$(auto_batches | head -1)
+  wait_until 50 test -f "$STAGING/$first/pages/page-002.jpg"
+  [ "$(jq -r .user "$STAGING/$first/batch.json")" = "eric" ]
+  [ "$(jq -r .source "$STAGING/$first/batch.json")" = "ADF Duplex" ]
+  st=$(curl -fs "$URL/api/status")
+  [ "$(jq -r ".batches[] | select(.id == \"$first\") | .state" <<<"$st")" = "scanning" ]
+  [ "$(jq -r ".batches[] | select(.id == \"$first\") | .auto" <<<"$st")" = "true" ]
+  [ "$(jq -r '.scanners[] | select(.slug == "brother") | .auto.phase' <<<"$st")" = "scanning" ]
+  [ "$(jq -r '[.jobs[] | select(.label | startswith("Auto-scan on"))] | length' <<<"$st")" = "1" ]
+  # The Scan button can't start a second batch on a scanner that is scanning.
+  run post /api/scan '{"scanner":"brother","user":"eric"}'
+  [ "${lines[1]}" = "409" ]
+
+  # The batch ends with the feeder empty, so the next feed starts a second one.
+  touch "$STAGING/$first/.stop"
+  wait_until 50 batch_state_is "$first" staged
+  wait_until 25 auto_phase_is watching
+  sleep 1
+  auto_count_is 1
+  echo Loaded > "$TMP/adf"
+  wait_until 50 auto_count_is 2
+  second=$(auto_batches | tail -1)
+  [ "$second" != "$first" ]
+  wait_until 50 test -f "$STAGING/$second/pages/page-002.jpg"
+
+  # Stopped with paper still in the feeder: that paper is not a new feed.
+  touch "$STAGING/$second/.stop"
+  echo Loaded > "$TMP/adf"
+  wait_until 50 batch_state_is "$second" staged
+  wait_until 25 auto_phase_is holding
+  sleep 2
+  auto_count_is 2
+  # Taken out and loaded again, it is.
+  echo Empty > "$TMP/adf"
+  wait_until 25 auto_phase_is watching
+  echo Loaded > "$TMP/adf"
+  wait_until 50 auto_count_is 3
+
+  # Switched off mid-batch: the batch finishes, and nothing starts after it.
+  third=$(auto_batches | tail -1)
+  run post /api/auto '{"scanner":"brother","enabled":false}'
+  [ "${lines[1]}" = "200" ]
+  wait_until 50 test -f "$STAGING/$third/pages/page-002.jpg"
+  touch "$STAGING/$third/.stop"
+  wait_until 50 batch_state_is "$third" staged
+  echo Loaded > "$TMP/adf"
+  sleep 2
+  auto_count_is 3
+  [ "$(auto_of phase)" = "off" ]
+}
+
+@test "auto-scan takes paper that lands just as a batch ends by its idle timeout" {
+  fake_brother Loaded
+  run post /api/auto '{"scanner":"brother","enabled":true,"user":"eric","idle":10}'
+  [ "${lines[1]}" = "200" ]
+  wait_until 50 auto_count_is 1
+  first=$(auto_batches | head -1)
+  wait_until 50 test -f "$STAGING/$first/pages/page-002.jpg"
+  # From here the watcher would see paper, and scan-batch never does: it runs
+  # out its idle time on a feeder it found empty at every look.
+  echo Loaded > "$TMP/adf-status"
+  wait_until 100 batch_state_is "$first" staged
+  [ "$(jq -r .ended "$STAGING/$first/batch.json")" = "idle" ]
+  [ "$(jq -r .pages "$STAGING/$first/batch.json")" = "2" ]
+  # The watcher never saw the feeder empty in between. The paper still counts.
+  wait_until 50 auto_count_is 2
+  second=$(auto_batches | tail -1)
+  [ "$second" != "$first" ]
+  # scan-batch finds no paper for the second batch, so stopping it leaves nothing staged.
+  rm "$TMP/adf-status"
+  touch "$STAGING/$second/.stop"
+  wait_until 50 test ! -d "$STAGING/$second"
+}
+
+@test "auto-scan that is already on scans paper waiting when the server starts" {
+  fake_brother Loaded
+  kill "$SERVER"; wait "$SERVER" 2>/dev/null || true
+  echo '{"brother":{"enabled":true,"user":"eric","duplex":false,"gray":true,"idle":10}}' > "$TMP/auto.json"
+  bun "$BATS_TEST_DIRNAME/../share/server.ts" --root "$ROOT" --staging "$STAGING" \
+    --port "$PORT" --no-open > "$TMP/server2.log" 2>&1 &
+  SERVER=$!
+  wait_until 50 auto_count_is 1
+  b=$(auto_batches | head -1)
+  wait_until 50 test -f "$STAGING/$b/pages/page-001.jpg"
+  [ "$(jq -r .source "$STAGING/$b/batch.json")" = "ADF Front" ]
+  [ "$(jq -r .mode "$STAGING/$b/batch.json")" = "Gray" ]
+  grep -q "auto-scan: paper in the Brother ADS-4300N, starting a batch as eric" "$TMP/server2.log"
+  touch "$STAGING/$b/.stop"
+  wait_until 50 batch_state_is "$b" staged
 }

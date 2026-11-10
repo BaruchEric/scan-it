@@ -390,6 +390,20 @@ details.checks li { display: grid; grid-template-columns: 4.5em minmax(0, 1fr) a
 .seg input:checked + span { background: var(--ink); color: var(--paper); }
 .seg input:focus-visible + span { outline: 2px solid var(--focus); outline-offset: 1px; }
 .scanform .acts { grid-column: 1 / -1; margin-top: 0; }
+.scanform .hint { grid-column: 1 / -1; margin: 0; font-size: 13px; color: var(--ink-2); }
+.auto { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--rule); display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 5px 12px; align-items: center; }
+.switch { display: inline-flex; align-items: center; gap: 9px; justify-self: start; font-size: 14px; font-weight: 600; cursor: pointer; }
+.switch input {
+  appearance: none; -webkit-appearance: none; flex: none; margin: 0; cursor: pointer;
+  width: 34px; height: 20px; border-radius: 999px; background: var(--axis); position: relative; transition: background .15s;
+}
+.switch input::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: var(--paper); transition: transform .15s; }
+.switch input:checked { background: var(--ink); }
+.switch input:checked::after { transform: translateX(14px); }
+.switch input:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 999px; }
+.switch input:disabled { opacity: .42; cursor: not-allowed; }
+.auto-note { grid-column: 1 / -1; margin: 0; font-size: 13px; color: var(--ink-2); }
+.auto.hold .auto-note { color: var(--ink); }
 .batches { margin-top: 14px; padding: 4px 20px 6px; }
 .batches-h { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 12px 0 8px; }
 .batches-h h3 { margin: 0; font-size: 16px; font-weight: 600; }
@@ -511,6 +525,8 @@ details.checks li { display: grid; grid-template-columns: 4.5em minmax(0, 1fr) a
 }
 @media (forced-colors: active) {
   .sw, .bar, .slot, .mix span { forced-color-adjust: none; }
+  .switch input { appearance: auto; -webkit-appearance: checkbox; width: 16px; height: 16px; border-radius: 0; }
+  .switch input::after { content: none; }
 }
 </style>
 </head>
@@ -1969,8 +1985,68 @@ details.checks li { display: grid; grid-template-columns: 4.5em minmax(0, 1fr) a
   }
 
   function idleLabel(n) { return n < 60 ? n + ' seconds' : n === 60 ? '1 minute' : n / 60 + ' minutes'; }
+  /* The four scan settings. The card holds two of these: one for the Scan
+     button, one for what auto-scan's batches use. */
+  function settingsForm(uid, label, hint, buttons) {
+    var f = {};
+    f.user = H('select', { id: uid + '-user' });
+    var users = C.users.slice();
+    if (LIVE.default_user && !users.some(function (u) { return u.slug === LIVE.default_user; })) users.push({ slug: LIVE.default_user, name: LIVE.default_user });
+    users.forEach(function (u) {
+      var o = H('option', { value: u.slug, text: u.name || u.slug });
+      if (u.slug === LIVE.default_user) o.selected = true;
+      f.user.append(o);
+    });
+    f.duplex = H('input', { type: 'checkbox', id: uid + '-duplex', checked: true });
+    f.color = H('input', { type: 'radio', name: uid + '-mode', value: 'color', checked: true });
+    f.gray = H('input', { type: 'radio', name: uid + '-mode', value: 'gray' });
+    f.idle = H('select', { id: uid + '-idle' });
+    [30, 60, 120, 300].forEach(function (n) {
+      var o = H('option', { value: n, text: idleLabel(n) });
+      if (n === 60) o.selected = true;
+      f.idle.append(o);
+    });
+    f.el = H('div', { class: 'scanform', role: 'group', 'aria-label': label, hidden: true },
+      hint ? H('p', { class: 'hint', text: hint }) : null,
+      H('label', { class: 'f', for: uid + '-user' }, 'Person at the scanner', f.user),
+      H('label', { class: 'f', for: uid + '-idle' }, 'Stop after idle', f.idle),
+      H('label', { class: 'chk' }, f.duplex, 'Both sides'),
+      H('fieldset', { class: 'seg' }, H('legend', { class: 'sr', text: 'Color mode' }),
+        H('label', null, f.color, H('span', { text: 'Color' })),
+        H('label', null, f.gray, H('span', { text: 'Gray' }))),
+      H('div', { class: 'acts' }, buttons));
+    f.get = function () {
+      return { user: f.user.value, duplex: f.duplex.checked, gray: f.gray.checked, idle: +f.idle.value };
+    };
+    f.set = function (a) {
+      function pick(sel, value, text) {
+        value = String(value);
+        if (!Array.prototype.some.call(sel.options, function (o) { return o.value === value; })) sel.append(H('option', { value: value, text: text }));
+        sel.value = value;
+      }
+      pick(f.user, a.user, userName(a.user));
+      pick(f.idle, a.idle, idleLabel(+a.idle));
+      f.duplex.checked = a.duplex !== false;
+      f.gray.checked = a.gray === true;
+      f.color.checked = !f.gray.checked;
+    };
+    return f;
+  }
+  function autoSummary(a) {
+    return 'Paper in the feeder starts a batch as ' + userName(a.user) + ', ' + (a.duplex === false ? 'one side' : 'both sides')
+      + ', in ' + (a.gray ? 'gray' : 'color') + '. It ends after ' + idleLabel(+a.idle || 60) + ' with no paper.';
+  }
+  function autoNote(a) {
+    switch (a.phase) {
+      case 'off': return 'Off. A scan starts from the Scan button.';
+      case 'scanning': return 'On. A batch is scanning now. Paper fed after it ends starts the next one.';
+      case 'holding': return 'On, but the paper in the feeder was there when the last batch ended, so it does not count as a new feed. Take it out and load it again, or press Scan.';
+      case 'waiting': return 'On. It starts again when the scanner is ready.';
+      default: return 'On. ' + autoSummary(a);
+    }
+  }
   function createScanner(s) {
-    var v = { slug: s.slug, el: H('article', { class: 'dev', id: 'scanner-' + s.slug }) };
+    var v = { slug: s.slug, auto: null, el: H('article', { class: 'dev', id: 'scanner-' + s.slug }) };
     v.info = H('div');
     v.scanBtn = H('button', { class: 'act primary', type: 'button', text: 'Scan', 'aria-expanded': 'false' });
     v.diagBtn = H('button', { class: 'act', type: 'button', text: 'Diagnose' });
@@ -1979,45 +2055,21 @@ details.checks li { display: grid; grid-template-columns: 4.5em minmax(0, 1fr) a
     v.msg = H('p', { class: 'msg', role: 'status', hidden: true });
 
     var uid = 'scan-' + s.slug.replace(/[^a-z0-9_-]/gi, '');
-    v.user = H('select', { id: uid + '-user' });
-    var users = C.users.slice();
-    if (LIVE.default_user && !users.some(function (u) { return u.slug === LIVE.default_user; })) users.push({ slug: LIVE.default_user, name: LIVE.default_user });
-    users.forEach(function (u) {
-      var o = H('option', { value: u.slug, text: u.name || u.slug });
-      if (u.slug === LIVE.default_user) o.selected = true;
-      v.user.append(o);
-    });
-    v.duplex = H('input', { type: 'checkbox', id: uid + '-duplex', checked: true });
-    v.color = H('input', { type: 'radio', name: uid + '-mode', value: 'color', checked: true });
-    v.gray = H('input', { type: 'radio', name: uid + '-mode', value: 'gray' });
-    v.idle = H('select', { id: uid + '-idle' });
-    [30, 60, 120, 300].forEach(function (n) {
-      var o = H('option', { value: n, text: idleLabel(n) });
-      if (n === 60) o.selected = true;
-      v.idle.append(o);
-    });
     v.startBtn = H('button', { class: 'act primary', type: 'button', text: 'Start scan' });
     v.cancelBtn = H('button', { class: 'act', type: 'button', text: 'Cancel' });
-    v.form = H('div', { class: 'scanform', role: 'group', 'aria-label': 'Scan settings', hidden: true },
-      H('label', { class: 'f', for: uid + '-user' }, 'Person at the scanner', v.user),
-      H('label', { class: 'f', for: uid + '-idle' }, 'Stop after idle', v.idle),
-      H('label', { class: 'chk' }, v.duplex, 'Both sides'),
-      H('fieldset', { class: 'seg' }, H('legend', { class: 'sr', text: 'Color mode' }),
-        H('label', null, v.color, H('span', { text: 'Color' })),
-        H('label', null, v.gray, H('span', { text: 'Gray' }))),
-      H('div', { class: 'acts' }, v.startBtn, v.cancelBtn));
+    v.form = settingsForm(uid, 'Scan settings', null, [v.startBtn, v.cancelBtn]);
 
     function openForm(open) {
-      v.form.hidden = !open;
+      v.form.el.hidden = !open;
       v.scanBtn.setAttribute('aria-expanded', String(open));
-      if (open) v.user.focus(); else v.scanBtn.focus();
+      if (open) { openAuto(false, true); v.form.user.focus(); } else v.scanBtn.focus();
     }
-    v.scanBtn.addEventListener('click', function () { openForm(v.form.hidden); });
+    v.scanBtn.addEventListener('click', function () { openForm(v.form.el.hidden); });
     v.cancelBtn.addEventListener('click', function () { openForm(false); });
     v.startBtn.addEventListener('click', function () {
-      post('scan:' + v.slug, v.startBtn, v.err, '/scan', {
-        scanner: v.slug, user: v.user.value, duplex: v.duplex.checked, gray: v.gray.checked, idle: +v.idle.value
-      }, function () {
+      var body = v.form.get();
+      body.scanner = v.slug;
+      post('scan:' + v.slug, v.startBtn, v.err, '/scan', body, function () {
         openForm(false);
         flash(v.msg, 'Scan started. Its batch shows up below in a few seconds.');
       });
@@ -2028,7 +2080,44 @@ details.checks li { display: grid; grid-template-columns: 4.5em minmax(0, 1fr) a
     v.restartBtn.addEventListener('click', function () {
       post('restart', v.restartBtn, v.err, '/brother/restart', {}, function () { flash(v.msg, 'Restarting. Progress is under Jobs.'); });
     });
-    v.el.append(v.info, H('div', { class: 'acts' }, v.scanBtn, v.diagBtn, v.restartBtn), v.err, v.msg, v.form);
+
+    /* Auto-scan: a switch, a sentence saying what it does right now, and its
+       own copy of the scan settings. Only scanners the server sends auto for. */
+    v.autoSw = H('input', { type: 'checkbox', role: 'switch', id: uid + '-auto' });
+    v.autoEdit = H('button', { class: 'linkbtn', type: 'button', text: 'Settings', 'aria-expanded': 'false', 'aria-label': 'Auto-scan settings' });
+    v.autoNote = H('p', { class: 'auto-note', id: uid + '-auto-note' });
+    v.autoSw.setAttribute('aria-describedby', uid + '-auto-note');
+    v.autoBox = H('div', { class: 'auto', hidden: true },
+      H('label', { class: 'switch', for: uid + '-auto' }, v.autoSw, H('span', { text: 'Auto-scan' })), v.autoEdit, v.autoNote);
+    v.saveBtn = H('button', { class: 'act primary', type: 'button', text: 'Save' });
+    v.autoCancel = H('button', { class: 'act', type: 'button', text: 'Cancel' });
+    v.autoForm = settingsForm(uid + '-auto', 'Auto-scan settings',
+      'Batches that start by themselves use these. To scan as someone else, press Scan before loading the paper.',
+      [v.saveBtn, v.autoCancel]);
+    function openAuto(open, quiet) {
+      if (open && v.auto) v.autoForm.set(v.auto);
+      v.autoForm.el.hidden = !open;
+      v.autoEdit.setAttribute('aria-expanded', String(open));
+      if (open) { openForm(false); v.autoForm.user.focus(); } else if (!quiet) v.autoEdit.focus();
+    }
+    v.autoEdit.addEventListener('click', function () { openAuto(v.autoForm.el.hidden); });
+    v.autoCancel.addEventListener('click', function () { openAuto(false); });
+    v.autoSw.addEventListener('change', function () {
+      var on = v.autoSw.checked;
+      post('auto:' + v.slug, v.autoSw, v.err, '/auto', { scanner: v.slug, enabled: on }, function () {
+        flash(v.msg, on ? 'Auto-scan is on. Load paper and it starts by itself.' : 'Auto-scan is off.');
+      });
+    });
+    v.saveBtn.addEventListener('click', function () {
+      var body = v.autoForm.get();
+      body.scanner = v.slug;
+      post('auto:' + v.slug, v.saveBtn, v.err, '/auto', body, function () {
+        openAuto(false);
+        flash(v.msg, 'Auto-scan settings saved.');
+      });
+    });
+
+    v.el.append(v.info, H('div', { class: 'acts' }, v.scanBtn, v.diagBtn, v.restartBtn), v.err, v.msg, v.form.el, v.autoBox, v.autoForm.el);
     return v;
   }
   function updateScanner(v, s) {
@@ -2069,10 +2158,24 @@ details.checks li { display: grid; grid-template-columns: 4.5em minmax(0, 1fr) a
     v.restartBtn.hidden = !canRestart && !restarting;
     v.restartBtn.disabled = frozen || !canRestart || !!live.busy.restart;
     v.restartBtn.textContent = restarting ? 'Restarting…' : restartLabel(s);
-    if (!allowed(s, 'scan') && !v.form.hidden) {
-      v.form.hidden = true;
+    if (!allowed(s, 'scan') && !v.form.el.hidden) {
+      v.form.el.hidden = true;
       v.scanBtn.setAttribute('aria-expanded', 'false');
     }
+
+    v.auto = isObj(s.auto) ? s.auto : null;
+    v.autoBox.hidden = !v.auto;
+    if (!v.auto) {
+      v.autoForm.el.hidden = true;
+      return;
+    }
+    var saving = !!live.busy['auto:' + v.slug];
+    /* Mid-request the switch shows what was asked for; after it, what the server holds. */
+    if (!saving) v.autoSw.checked = !!v.auto.enabled;
+    v.autoSw.disabled = frozen || saving;
+    v.saveBtn.disabled = frozen || saving;
+    v.autoBox.className = 'auto' + (v.auto.phase === 'holding' ? ' hold' : '');
+    v.autoNote.textContent = autoNote(v.auto);
   }
 
   var BATCH_ACTIONS = [
@@ -2140,7 +2243,7 @@ details.checks li { display: grid; grid-template-columns: 4.5em minmax(0, 1fr) a
     var spec = BATCH_STATE[b.state === 'filed' && !b.review_items ? 'kept' : b.state] || ['pending', String(b.state || 'Unknown'), ''];
     var meta = H('p', { class: 'b-meta' });
     if (b.scanner) meta.append(H('span', { text: liveScannerName(b.scanner) }));
-    if (b.user) meta.append(H('span', { text: userName(b.user) }));
+    if (b.user) meta.append(H('span', { text: userName(b.user) + (b.auto ? ' (auto-scan)' : '') }));
     meta.append(H('span', { text: (b.mode === 'Gray' ? 'Gray' : 'Color') + ', ' + (b.duplex ? 'both sides' : 'one side') + (b.resolution ? ', ' + b.resolution + ' dpi' : '') }));
     if (b.default_entity) meta.append(H('span', { text: 'For ' + entName(b.default_entity) }));
     var started = isoMs(b.started);

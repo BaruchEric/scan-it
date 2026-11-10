@@ -37,6 +37,8 @@ teardown() { rm -rf "$TMP"; }
   [ -f "$staging/pages/page-004.jpg" ]
   [ "$(jq -r '.pages' "$staging/batch.json")" = "4" ]
   [ "$(jq -c '.chunks' "$staging/batch.json")" = "[4]" ]
+  # Ended by the idle timeout: the feeder was empty at the last look.
+  [ "$(jq -r '.ended' "$staging/batch.json")" = "idle" ]
 }
 
 @test "auto-resumes when more paper lands, numbering continues" {
@@ -91,6 +93,7 @@ teardown() { rm -rf "$TMP"; }
   run "$SCAN_BATCH" -o "$BATCHES" --idle 30
   [ "$status" -eq 1 ]
   [[ "$output" == *"nothing feeding"* ]]
+  [ "$(jq -r '.ended' "$BATCHES"/batch-*/batch.json)" = "jam" ]
 }
 
 @test "records scanner, user, host and the profile's default entity in batch.json" {
@@ -159,6 +162,7 @@ JSON
   done
   # batch.json exists before any paper lands, so the dashboard can show it.
   [ "$(jq -r '.pages' "$staging/batch.json")" = "0" ]
+  [ "$(jq -r '.ended' "$staging/batch.json")" = "null" ]
   [ "$(cat "$staging/.pid")" = "$pid" ]
   echo 2 > "$SCANIMAGE_STUB_DIR/feed"
   echo yes > "$SCANIMAGE_STUB_DIR/sensor"
@@ -168,6 +172,31 @@ JSON
   [ "$rc" -eq 0 ]
   grep -q "Stop requested." "$TMP/out"
   [ "$(jq -r '.pages' "$staging/batch.json")" = "2" ]
+  [ "$(jq -r '.ended' "$staging/batch.json")" = "stop" ]
   [ ! -e "$staging/.pid" ]
   [ ! -e "$staging/.stop" ]
+}
+
+@test "--auto-started marks the batch, a resume keeps the mark, and a person's batch has none" {
+  echo 2 > "$SCANIMAGE_STUB_DIR/feed"
+  echo yes > "$SCANIMAGE_STUB_DIR/sensor"
+  run "$SCAN_BATCH" -o "$BATCHES" --idle 1 --auto-started --user eric
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Started by auto-scan"* ]]
+  staging=$(echo "$BATCHES"/batch-*)
+  [ "$(jq -r '.auto' "$staging/batch.json")" = "true" ]
+  [ "$(jq -r '.user' "$staging/batch.json")" = "eric" ]
+
+  echo 2 > "$SCANIMAGE_STUB_DIR/feed"
+  echo yes > "$SCANIMAGE_STUB_DIR/sensor"
+  run "$SCAN_BATCH" --resume "$staging" --idle 1
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.pages' "$staging/batch.json")" = "4" ]
+  [ "$(jq -r '.auto' "$staging/batch.json")" = "true" ]
+
+  echo 2 > "$SCANIMAGE_STUB_DIR/feed"
+  echo yes > "$SCANIMAGE_STUB_DIR/sensor"
+  run "$SCAN_BATCH" -o "$TMP/other" --idle 1
+  [ "$status" -eq 0 ]
+  [ "$(jq -r 'has("auto")' "$TMP"/other/batch-*/batch.json)" = "false" ]
 }
