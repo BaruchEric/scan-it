@@ -695,7 +695,8 @@ details.checks li { display: grid; grid-template-columns: 4.5em minmax(0, 1fr) a
     scanners: arr(raw.scanners).filter(function (s) { return isObj(s) && s.slug; }),
     documents: arr(raw.documents).filter(function (d) { return isObj(d) && typeof d.file === 'string'; }),
     paychecks: arr(raw.paychecks).filter(function (p) { return isObj(p) && typeof p.file === 'string'; }),
-    review: arr(raw.review).filter(function (r) { return isObj(r) && typeof r.file === 'string'; })
+    review: arr(raw.review).filter(function (r) { return isObj(r) && typeof r.file === 'string'; }),
+    queue: arr(raw.queue).filter(function (b) { return isObj(b) && typeof b.id === 'string'; })
   };
   var LOCKED = C.scope !== 'all';
 
@@ -1013,15 +1014,19 @@ details.checks li { display: grid; grid-template-columns: 4.5em minmax(0, 1fr) a
       sub.textContent = 'Run scan-catalog dashboard to fill it with the filed scans. It writes a copy at the scans root and one inside each entity folder.';
       return;
     }
-    if (!C.documents.length && !C.paychecks.length && !C.review.length) {
+    var waiting = waitingBatches();
+    if (!C.documents.length && !C.paychecks.length && !C.review.length && !waiting.length) {
       h.textContent = 'Nothing filed yet';
       sub.textContent = 'Scan a stack with scan-batch and file it with batch-file. This page fills in the next time scan-catalog dashboard runs.';
       return;
     }
     var parts = [];
+    if (waiting.length) parts.push(plural(waiting.length, 'batch', 'batches') + ' waiting to be filed');
     if (items.length) parts.push(plural(items.length, 'follow-up') + ' open');
     if (v.review.length) parts.push(plural(v.review.length, 'scan') + ' to review');
-    h.textContent = parts.length ? parts.join(' and ') : 'Nothing needs you';
+    h.textContent = parts.length
+      ? (parts.length > 2 ? parts.slice(0, -1).join(', ') + ' and ' + parts[parts.length - 1] : parts.join(' and '))
+      : 'Nothing needs you';
     var s = [];
     if (failed) s.push(plural(failed, 'follow-up') + ' failed and ' + (failed === 1 ? 'needs' : 'need') + ' a retry; failed items are listed first.');
     else if (parts.length) s.push('Oldest first in each list. Every name opens its PDF.');
@@ -1033,6 +1038,7 @@ details.checks li { display: grid; grid-template-columns: 4.5em minmax(0, 1fr) a
     items.forEach(function (i) { (groups[i.f.key] = groups[i.f.key] || []).push(i); });
     var keys = WORKFLOWS.map(function (w) { return w.key; }).filter(function (k) { return groups[k]; })
       .concat(Object.keys(groups).filter(function (k) { return !WF[k]; }));
+    if (waiting.length) q.append(waitingGroup(waiting));
     if (v.review.length) q.append(reviewGroup(v.review));
     keys.forEach(function (k) {
       var list = groups[k].sort(function (a, b) {
@@ -1080,6 +1086,36 @@ details.checks li { display: grid; grid-template-columns: 4.5em minmax(0, 1fr) a
         H('div', { class: 'qtitle' }, fileLink(file, title)),
         H('div', { class: 'qmeta' }, meta),
         f.note ? H('div', { class: 'qnote' + (f.status === 'failed' ? ' failed' : ''), text: f.note }) : null));
+  }
+  /* Batches scanned but not filed yet: the previews scan-queue keeps in
+     _queue/. The live page lists them under its batches instead. */
+  function waitingBatches() {
+    return C.scope === 'all' && !readLive() ? C.queue : [];
+  }
+  var STOPPED = { jam: 'a jam', lost: 'the scanner dropping off', interrupted: 'an interruption' };
+  function waitingGroup(list) {
+    var lis = list.slice().sort(function (a, b) {
+      return String(a.started || '').localeCompare(String(b.started || ''));
+    }).map(function (b) {
+      var st = stamp(b.started), meta = [];
+      var title = st && st.day
+        ? 'Scanned ' + fmtDayShort(st.day) + (st.hh != null ? ', ' + fmtTime(st.hh, st.mm) : '')
+        : b.id;
+      meta.push(H('span', { text: plural(+b.pages || 0, 'page') }));
+      if (b.user) meta.push(H('span', { text: (b.auto ? 'auto-scan, recorded as ' : 'by ') + userName(b.user) }));
+      if (+b.damaged) meta.push(H('span', { text: plural(+b.damaged, 'damaged page') }));
+      var note = b.state === 'ready'
+        ? 'Sorted and approved. File it from the live dashboard.'
+        : 'Not sorted yet. Copy Claude prompt on the live dashboard hands it to Claude.';
+      if (STOPPED[b.ended]) note = 'Scanning stopped after ' + STOPPED[b.ended] + ', so the stack may be incomplete. ' + note;
+      return H('li', { class: 'qitem' },
+        icon('pending', b.state === 'ready' ? 'Ready to file' : 'Waiting'),
+        H('div', null,
+          H('div', { class: 'qtitle' }, fileLink(typeof b.file === 'string' ? b.file : '_queue/' + b.id + '.pdf', title)),
+          H('div', { class: 'qmeta' }, meta),
+          H('div', { class: 'qnote', text: note })));
+    });
+    return queueGroup('Waiting to be filed', 'Scanned but not filed yet. Each one opens a preview of its pages.', list.length, lis);
   }
   function reviewGroup(list) {
     var lis = list.slice().sort(function (a, b) {

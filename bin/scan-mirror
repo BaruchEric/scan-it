@@ -8,6 +8,12 @@
 #      into) to the NAS's mirror: adds and updates, never deletes
 #   2. "push": the NAS copies its mirror into My Drive with rclone, never deletes
 # A file moved or deleted here therefore stays where it was in Drive.
+#
+# One exception: scans/_queue, the batches scanned but not filed yet (see
+# scan-queue). Before the copy, scan-queue sync brings it up to date here;
+# after it, "queue-prune" on the NAS removes the previews that left the queue,
+# and push mirrors that one folder into Drive (removed files go to Drive's
+# trash). A NAS receiver without queue-prune leaves them in place.
 set -euo pipefail
 
 usage() {
@@ -109,11 +115,22 @@ if [[ "$mode" == import ]]; then
   exit 0
 fi
 
+script_dir=$(cd "$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")" && pwd)
+"$script_dir/scan-queue" -r "$root" sync \
+  || echo "scan-mirror: scan-queue sync failed; Drive's _queue may be out of date" >&2
+
 # Dot files (locks, partial uploads, scan-it's own state) stay here.
 rsync -rt --exclude '.*' -e "ssh -o BatchMode=yes -o ConnectTimeout=10" \
   "$drive_root/" "$SCAN_MIRROR_HOST:mirror/" \
   || { echo "scan-mirror: rsync to $SCAN_MIRROR_HOST failed" >&2; exit 1; }
 echo "scan-mirror: $drive_root -> $SCAN_MIRROR_HOST mirror"
+# The previews still queued here; the NAS drops the rest from its mirror.
+# Only once sync has written queue.json, so a failed sync never empties it.
+if [[ -f "$root/_queue/queue.json" ]]; then
+  ( shopt -s nullglob; for f in "$root"/_queue/batch-*.pdf; do basename "$f"; done ) \
+    | ssh -o BatchMode=yes -o ConnectTimeout=10 "$SCAN_MIRROR_HOST" queue-prune \
+    || echo "scan-mirror: the NAS did not prune its _queue (receiver without queue-prune?); filed batches stay in Drive's _queue" >&2
+fi
 (( push )) || exit 0
 ssh -n -o BatchMode=yes -o ConnectTimeout=10 "$SCAN_MIRROR_HOST" push \
   || { echo "scan-mirror: the NAS's push to Drive failed" >&2; exit 1; }

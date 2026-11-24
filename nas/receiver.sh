@@ -3,11 +3,18 @@
 # (its local "My Drive": scans/ plus the folders entities.json copies into)
 # arrives in mirror/ by rsync, and "push" copies mirror/ into Google Drive.
 # Drive credentials stay on the NAS. Nothing here deletes, in mirror/ or in
-# Drive.
+# Drive, except in scans/_queue: the previews of batches scanned but not filed
+# yet. "queue-prune" drops the previews scan-it no longer queues, and push
+# mirrors that one folder into Drive, whose deletes go to Drive's trash.
+#
+# Source: ~/dev/office/scan-it/nas/receiver.sh on the Mac. Installed at
+# /share/CACHEDEV1_DATA/Backups/scan-it/receiver.sh, the previous one beside
+# it as receiver.sh.prev.
 set -eu
 umask 022
 ROOT=/share/CACHEDEV1_DATA/Backups/scan-it
 MIRROR=$ROOT/mirror
+QUEUE=$MIRROR/scans/_queue
 D=/share/CACHEDEV1_DATA/.qpkg/container-station/bin/docker
 RCLONE=rclone/rclone@sha256:45401ad7410db1d67ffdb58e19059ad20b0d8e0285a60e38bbec55cc1019c7a5
 # baruchriollc's My Drive, which holds scans/. Full drive scope (scans/ was made
@@ -49,8 +56,38 @@ case "${1:-}" in
   push)
     [ "$#" -eq 1 ] || exit 64
     [ -e "$IMPORTED" ] || { echo "scan-it receiver: push waits for the one-time import (touch $IMPORTED)" >&2; exit 65; }
-    rc ro copy /mirror "$DRIVE" --exclude '.*' --exclude '.*/**' --log-level NOTICE
+    mkdir -p "$QUEUE"
+    rc ro copy /mirror "$DRIVE" --exclude '.*' --exclude '.*/**' --exclude '/scans/_queue/**' --log-level NOTICE
+    rc ro sync /mirror/scans/_queue "${DRIVE}scans/_queue" --exclude '.*' --log-level NOTICE
     echo "pushed $(date -Iseconds)"
+    ;;
+  queue-prune)
+    # stdin: the preview names scan-it still queues, one per line. Every
+    # other batch-*.pdf in mirror/scans/_queue goes. Only names of that exact
+    # shape are read or removed, so nothing outside the queue can be touched.
+    [ "$#" -eq 1 ] || exit 64
+    mkdir -p "$QUEUE"
+    keep=$(mktemp)
+    if ! head -n 5000 | while IFS= read -r n; do
+         printf '%s\n' "$n" | grep -Eqx 'batch-[0-9]{8}-[0-9]{6}[.]pdf' || exit 64
+         printf '%s\n' "$n"
+       done > "$keep"; then
+      rm -f "$keep"
+      echo "scan-it receiver: queue-prune takes batch-YYYYMMDD-HHMMSS.pdf names only" >&2
+      exit 64
+    fi
+    removed=0
+    set +f  # globbing is off for the command words above; this loop needs it
+    for f in "$QUEUE"/batch-*.pdf; do
+      [ -f "$f" ] || continue
+      n=$(basename "$f")
+      printf '%s\n' "$n" | grep -Eqx 'batch-[0-9]{8}-[0-9]{6}[.]pdf' || continue
+      grep -qxF "$n" "$keep" && continue
+      rm -f "$f"
+      removed=$((removed + 1))
+    done
+    rm -f "$keep"
+    echo "queue-prune: removed $removed"
     ;;
   status)
     [ "$#" -eq 1 ] || exit 64
@@ -73,5 +110,5 @@ case "${1:-}" in
     date -Iseconds > "$IMPORTED"
     echo "scan-it receiver: import marked done"
     ;;
-  *) echo "scan-it receiver: rsync (upload) | push | status | import | imported" >&2; exit 64 ;;
+  *) echo "scan-it receiver: rsync (upload) | queue-prune | push | status | import | imported" >&2; exit 64 ;;
 esac

@@ -1,0 +1,203 @@
+#!/usr/bin/env bash
+# scan-queue: put every batch that is scanned but not filed yet in the
+# filing root's _queue/ folder, so it shows up in Drive.
+#
+# The raw pages stay in staging (~/.cache/scan-it/batches): 300 dpi JPEGs of
+# about 5 MB each are too heavy to send through the mirror for a file that
+# lives only until the batch is filed. The queue holds one preview PDF per
+# batch at 150 dpi, plus queue.json describing each one:
+#
+#   <root>/_queue/batch-<ts>.pdf    the batch's pages in scan order, unrotated
+#   <root>/_queue/queue.json        {"batches": [{id, file, state, pages, ...}]}
+#
+# A batch is queued once scanning ends (batch.json has "ended") and leaves the
+# queue when batch-file files it (.filed or staging removed) or the dashboard
+# discards it. "sync" reconciles the folder with staging; scan-mirror runs it
+# before every copy to the NAS, and "kick" starts that mirror run right away.
+#
+# Part of the scan-it project (~/dev/office/scan-it).
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage: scan-queue [-r ROOT] [-s STAGING] sync
+       scan-queue [-r ROOT] list [--json]
+       scan-queue kick
+
+  sync    write a preview PDF for each staged batch whose scanning has ended,
+          drop entries for batches that were filed or discarded, rewrite
+          queue.json, and refresh the dashboards when anything changed
+  list    print the queue from queue.json, newest first: id, state, pages,
+          user, when scanned, preview path. Works on Drive's copy too.
+  kick    start scan-it-mirror.service now (no wait), which runs sync and
+          carries the queue to Drive. Does nothing where that unit is not
+          installed, or when SCAN_QUEUE_KICK=0.
+
+  -r, --root DIR      filing root (default: $SCAN_ROOT or ~/My Drive/scans)
+  -s, --staging DIR   batch staging (default: $SCAN_STAGING or
+                      ~/.cache/scan-it/batches)
+
+Env: SCAN_QUEUE_DPI (default 150): preview resolution.
+Exit codes: 0 done · 1 failure · 64 usage
+EOF
+}
+
+root="${SCAN_ROOT:-$HOME/My Drive/scans}"
+staging_root="${SCAN_STAGING:-$HOME/.cache/scan-it/batches}"
+preview_dpi="${SCAN_QUEUE_DPI:-150}"
+cmd=""
+as_json=0
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -r|--root)
+      [[ $# -ge 2 ]] || { echo "scan-queue: $1 requires a value" >&2; exit 64; }
+      root="$2"; shift ;;
+    -s|--staging)
+      [[ $# -ge 2 ]] || { echo "scan-queue: $1 requires a value" >&2; exit 64; }
+      staging_root="$2"; shift ;;
+    --json) as_json=1 ;;
+    -h|--help) usage; exit 0 ;;
+    sync|list|kick)
+      [[ -z "$cmd" ]] || { echo "scan-queue: one command at a time" >&2; exit 64; }
+      cmd="$1" ;;
+    *) echo "scan-queue: unknown argument: $1" >&2; usage >&2; exit 64 ;;
+  esac
+  shift
+done
+[[ -n "$cmd" ]] || { usage >&2; exit 64; }
+[[ "$preview_dpi" =~ ^[1-9][0-9]*$ ]] || { echo "scan-queue: SCAN_QUEUE_DPI must be a whole number" >&2; exit 64; }
+root="${root%/}"
+staging_root="${staging_root%/}"
+queue="$root/_queue"
+script_dir=$(cd "$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")" && pwd)
+
+if [[ "$cmd" == kick ]]; then
+  [[ "${SCAN_QUEUE_KICK:-1}" != 0 ]] || exit 0
+  unit="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/scan-it-mirror.service"
+  [[ -f "$unit" ]] && command -v systemctl >/dev/null 2>&1 || exit 0
+  export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+  systemctl --user start --no-block scan-it-mirror.service 2>/dev/null \
+    || echo "scan-queue: could not start scan-it-mirror.service; the next timer run picks the queue up" >&2
+  exit 0
+fi
+
+command -v jq >/dev/null 2>&1 || { echo "scan-queue: jq not found" >&2; exit 1; }
+
+if [[ "$cmd" == list ]]; then
+  [[ -f "$queue/queue.json" ]] || { (( as_json )) && echo '{"batches":[]}'; exit 0; }
+  if (( as_json )); then jq . "$queue/queue.json"; exit 0; fi
+  jq -r --arg q "$queue" '.batches | sort_by(.started // "") | reverse | .[]
+    | [.id, .state, "\(.pages)p", (.user // "-"), (.started // "-"), "\($q)/\(.id).pdf"] | @tsv' \
+    "$queue/queue.json"
+  exit 0
+fi
+
+# ---------- sync ----------
+for tool in magick img2pdf; do
+  command -v "$tool" >/dev/null 2>&1 || { echo "scan-queue: '$tool' not found" >&2; exit 1; }
+done
+[[ -d "$root" ]] || { echo "scan-queue: no filing root at $root" >&2; exit 1; }
+mkdir -p "$queue"
+old="$queue/queue.json"
+[[ -f "$old" ]] && jq -e '.batches | type == "array"' "$old" >/dev/null 2>&1 || old=""
+
+work=$(mktemp -d "${TMPDIR:-/tmp}/scan-queue.XXXXXX")
+trap 'rm -rf "$work"' EXIT
+: > "$work/entries.jsonl"
+changed=0
+
+# scan-batch is still feeding this batch: batch.json has no "ended" yet and
+# its .pid names a live scan-batch. "ended" settles it first, so the moment
+# between scan-batch writing it and exiting never hides a finished batch.
+scanning() { # <dir>
+  local pid
+  pid=$(cat "$1/.pid" 2>/dev/null) || return 1
+  [[ "$pid" =~ ^[0-9]+$ ]] && (( pid > 1 )) || return 1
+  kill -0 "$pid" 2>/dev/null || [[ -d "/proc/$pid" ]] || return 1
+  ps -p "$pid" -o command= 2>/dev/null | grep -q scan-batch
+}
+
+# Runs at nice 19, one page at a time: scan-it has two cores and may be
+# scanning the next batch meanwhile. Called from an if, so errexit is off in
+# here and every step checks its own status.
+render() { # <dir> <id> <resolution>: preview PDF into the queue, atomically
+  local dir="$1" id="$2" res="$3" out="$work/$2" f
+  mkdir -p "$out" || return 1
+  for f in "$dir"/pages/page-*.jpg; do
+    if (( res > preview_dpi )); then
+      nice -n 19 magick "$f" -resize "$(( preview_dpi * 100 / res ))%" -quality 70 \
+        -units PixelsPerInch -density "$preview_dpi" "$out/$(basename "$f")" || return 1
+    else
+      cp "$f" "$out/" || return 1
+    fi
+  done
+  nice -n 19 img2pdf -o "$queue/.$id.pdf.tmp" "$out"/page-*.jpg || return 1
+  mv "$queue/.$id.pdf.tmp" "$queue/$id.pdf" || return 1
+  rm -rf "$out"
+}
+
+shopt -s nullglob
+for dir in "$staging_root"/batch-*; do
+  id=$(basename "$dir")
+  [[ "$id" =~ ^batch-[0-9]{8}-[0-9]{6}$ && -d "$dir/pages" ]] || continue
+  [[ ! -e "$dir/.filed" ]] || continue
+  meta="$dir/batch.json"
+  jq -e 'type == "object"' "$meta" >/dev/null 2>&1 || continue
+  if [[ -z "$(jq -r '.ended // empty' "$meta")" ]] && scanning "$dir"; then continue; fi
+  pages=("$dir"/pages/page-*.jpg)
+  (( ${#pages[@]} > 0 )) || continue
+  state=staged
+  [[ ! -f "$dir/manifest.json" ]] || state=ready
+  res=$(jq -r '.resolution // 300 | if type == "number" and . > 0 then floor else 300 end' "$meta")
+  entry=$(jq -c --arg id "$id" --arg state "$state" --argjson pages "${#pages[@]}" '
+    {id: $id, file: ("_queue/" + $id + ".pdf"), state: $state, pages: $pages,
+     started: (.started // null), updated: (.updated // null), ended: (.ended // null),
+     user: (.user // null), scanner: (.scanner // null), auto: (.auto == true),
+     default_entity: (.default_entity // null), damaged: ((.damaged // []) | length)}' "$meta")
+  prev=""
+  [[ -z "$old" ]] || prev=$(jq -c --arg id "$id" 'first(.batches[] | select(.id == $id)) // empty' "$old")
+  # The pages changed when the count or batch.json's "updated" did (a resume).
+  same_pages=0
+  if [[ -n "$prev" && -f "$queue/$id.pdf" ]] \
+     && jq -e --argjson e "$entry" '.pages == $e.pages and .updated == $e.updated' <<<"$prev" >/dev/null; then
+    same_pages=1
+  fi
+  if (( ! same_pages )); then
+    if ! render "$dir" "$id" "$res"; then
+      rm -f "$queue/.$id.pdf.tmp"
+      echo "scan-queue: could not make the preview for $id; left out of the queue this time" >&2
+      continue
+    fi
+    changed=1
+    echo "queued $id (${#pages[@]} pages, $state)"
+  fi
+  [[ "$prev" == "$entry" ]] || changed=1
+  echo "$entry" >> "$work/entries.jsonl"
+done
+
+# Previews of batches that were filed, discarded or never queued go.
+for f in "$queue"/batch-*.pdf; do
+  id=$(basename "$f" .pdf)
+  if ! grep -q "\"id\":\"$id\"" "$work/entries.jsonl"; then
+    rm -f "$f"
+    changed=1
+    echo "dropped $id"
+  fi
+done
+
+new=$(jq -s -c 'sort_by(.started // "") | {batches: .}' "$work/entries.jsonl")
+if [[ -z "$old" ]] || [[ "$(jq -c '{batches: (.batches | sort_by(.started // ""))}' "$old")" != "$new" ]]; then
+  changed=1
+fi
+if (( changed )) || [[ ! -f "$queue/queue.json" ]]; then
+  jq . <<<"$new" > "$queue/.queue.json.tmp"
+  mv "$queue/.queue.json.tmp" "$queue/queue.json"
+  catalog="$script_dir/scan-catalog"
+  [[ -x "$catalog" ]] || catalog=$(command -v scan-catalog || true)
+  if [[ -n "$catalog" ]]; then
+    "$catalog" -r "$root" dashboard >/dev/null 2>&1 \
+      || echo "scan-queue: note: dashboard refresh failed (run: scan-catalog dashboard)" >&2
+  fi
+fi
+echo "queue: $(jq '.batches | length' "$queue/queue.json") batch(es) waiting in $queue"

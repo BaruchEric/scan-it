@@ -2690,5 +2690,35 @@
         "scanned": "2026-11-07T14:30:00-0800"
       }
     }
+  ],
+  "queue": [
+    {
+      "id": "batch-20261123-170612",
+      "file": "_queue/batch-20261123-170612.pdf",
+      "state": "staged",
+      "pages": 2,
+      "started": "2026-11-23T17:06:12-0800",
+      "updated": "2026-11-23T17:07:17-0800",
+      "ended": "idle",
+      "user": "eric",
+      "scanner": "brother",
+      "auto": true,
+      "default_entity": null,
+      "damaged": 0
+    },
+    {
+      "id": "batch-20261122-093015",
+      "file": "_queue/batch-20261122-093015.pdf",
+      "state": "ready",
+      "pages": 14,
+      "started": "2026-11-22T09:30:15-0800",
+      "updated": "2026-11-22T09:34:02-0800",
+      "ended": "jam",
+      "user": "ariel",
+      "scanner": "brother",
+      "auto": false,
+      "default_entity": "rio-laundromat",
+      "damaged": 1
+    }
   ]
 }

@@ -50,7 +50,7 @@ tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
 if [ "$empty" = 1 ]; then
-  jq '.documents = [] | .paychecks = [] | .review = [] | .entities = [] | .users = [] | .scanners = []' "$catalog" > "$tmp/in.json"
+  jq '.documents = [] | .paychecks = [] | .review = [] | .queue = [] | .entities = [] | .users = [] | .scanners = []' "$catalog" > "$tmp/in.json"
 elif [ -n "$entity" ]; then
   jq --arg e "$entity" '
     if any(.entities[]; .slug == $e) then . else error("no entity \($e) in catalog") end
@@ -60,6 +60,7 @@ elif [ -n "$entity" ]; then
     | .documents = [.documents[] | select(.entity == $e) | .file |= ltrimstr($e + "/")]
     | .paychecks = [.paychecks[] | select(.entity == $e) | .file |= ltrimstr($e + "/")]
     | .review = []
+    | .queue = []
   ' "$catalog" > "$tmp/in.json"
 else
   cp "$catalog" "$tmp/in.json"

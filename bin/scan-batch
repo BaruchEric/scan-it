@@ -5,7 +5,8 @@
 # and resumes the moment more paper lands. Pages accumulate as per-page JPEGs
 # in a staging dir for the batch workflow (Claude analysis -> batch-file).
 # Staging stays on local disk (~/.cache/scan-it/batches): only finished PDFs
-# belong in the Drive-synced filing root. batch.json records which scanner
+# belong in the Drive-synced filing root, plus the 150 dpi preview scan-queue
+# puts in <root>/_queue/ once the batch ends. batch.json records which scanner
 # and which user made the batch, plus the scan profile's default entity from
 # <filing root>/profiles.json.
 # Works with the Brother ADS-4300N (via escl-scan) and the borrowed ScanSnap
@@ -347,10 +348,11 @@ wait_for_paper() {
 
 # .pid marks the batch as scanning for scan-catalog serve; a .stop file (the
 # dashboard's Stop button, or touch) ends the batch at the next poll, the same
-# as pressing Enter. Both go away when scan-batch exits.
+# as pressing Enter. Both go away when scan-batch exits, and the exit kicks
+# scan-mirror so the batch shows up in _queue/ in Drive within a minute.
 rm -f "$staging/.stop"
 echo $$ > "$staging/.pid"
-trap 'rm -f "$staging/.pid" "$staging/.stop"' EXIT
+trap 'rm -f "$staging/.pid" "$staging/.stop"; "$script_dir/scan-queue" kick >/dev/null 2>&1 || true' EXIT
 write_batch_json
 stop_requested() { [[ -f "$staging/.stop" ]] && echo "Stop requested."; }
 

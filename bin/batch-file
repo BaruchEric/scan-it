@@ -565,3 +565,5 @@ else
   now > "$staging/.filed"
   echo "Staging kept: $staging"
 fi
+# The batch leaves _queue/: the mirror run this starts drops its preview.
+if command -v scan-queue >/dev/null 2>&1; then scan-queue kick || true; fi

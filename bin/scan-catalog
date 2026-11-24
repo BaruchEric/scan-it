@@ -91,7 +91,7 @@ trap 'rm -rf "$tmp"' EXIT
 collect() {
   [[ -d "$root" ]] || return 0
   find "$root" -type f -name '*.json' \
-    -not -path "$root/_index/*" -not -path "$root/.*" -not -path "$root/*/.*" \
+    -not -path "$root/_index/*" -not -path "$root/_queue/*" -not -path "$root/.*" -not -path "$root/*/.*" \
     -not -name entities.json -not -name profiles.json -print0 \
   | while IFS= read -r -d '' f; do
       jq -c --arg path "$f" '{path: $path, d: .}' "$f" 2>/dev/null \
@@ -110,7 +110,8 @@ build() { # [entity] -> catalog JSON on stdout
   jq -s --arg root "$root" --arg scope "$scope" \
      --arg now "$(date +%Y-%m-%dT%H:%M:%S%z)" \
      --argjson reg "$(registry "$root/entities.json" '{"entities":[]}')" \
-     --argjson prof "$(registry "$root/profiles.json" '{}')" '
+     --argjson prof "$(registry "$root/profiles.json" '{}')" \
+     --argjson queue "$(registry "$root/_queue/queue.json" '{"batches":[]}')" '
     def rel: .path | ltrimstr($root + "/");
     # Per-entity dashboards sit in <root>/<entity>/, so their links drop the
     # entity folder and survive the folder being shared or renamed.
@@ -150,7 +151,9 @@ build() { # [entity] -> catalog JSON on stdout
           | select(rel | startswith("_review/"))
           | select($scope == "all")
           | {file: pdf, reason: (.d.reason // "unspecified"), guess: (.d.guess // {}),
-             source: ((.d.source // {}) | del(.pages))}]
+             source: ((.d.source // {}) | del(.pages))}],
+        # Batches scanned but not filed yet (scan-queue), on the full dashboard only.
+        queue: (if $scope == "all" then [($queue.batches // [])[] | select(type == "object" and (.id | type == "string"))] else [] end)
       }
     | .documents |= sort_by(.date // .filed // "") ' "$tmp/sidecars.jsonl"
 }

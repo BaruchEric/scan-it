@@ -933,6 +933,10 @@ class RealBackend implements Backend {
       if (mv.status !== 0) throw new HttpError(500, `Could not move ${b.id} to the Trash.`);
     }
     rmSync(join(THUMBS, b.id), { recursive: true, force: true });
+    // The mirror run this starts drops the batch's preview from _queue/ in Drive.
+    const kick = spawn(tool("scan-queue"), ["kick"], { env: CHILD_ENV, stdio: "ignore", detached: true });
+    kick.on("error", () => { /* best effort: the timer's run gets there too */ });
+    kick.unref();
   }
 
   reveal(path: string): void {
