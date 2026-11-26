@@ -408,6 +408,8 @@ details.checks li { display: grid; grid-template-columns: 4.5em minmax(0, 1fr) a
 .batches-h { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 12px 0 8px; }
 .batches-h h3 { margin: 0; font-size: 16px; font-weight: 600; }
 .batches-h span { font-size: 13px; color: var(--ink-2); }
+.bh-end { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: flex-end; gap: 6px 12px; }
+.batches > .copybox, .batches > .msg { margin: 0 0 10px; }
 .blist { list-style: none; margin: 0; padding: 0; }
 .batch { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px 28px; padding: 16px 0 18px; border-top: 1px solid var(--rule); scroll-margin-top: 16px; }
 .b-top { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px; }
@@ -559,7 +561,9 @@ details.checks li { display: grid; grid-template-columns: 4.5em minmax(0, 1fr) a
       </aside>
     </div>
     <section class="batches" id="batches" aria-labelledby="batches-h" hidden>
-      <div class="batches-h"><h3 id="batches-h">Batches in progress</h3><span id="batches-count"></span></div>
+      <div class="batches-h"><h3 id="batches-h">Batches in progress</h3><div class="bh-end"><button class="act" type="button" id="batches-analyze" hidden>Copy Claude prompt for all</button><span id="batches-count"></span></div></div>
+      <div class="copybox" id="batches-copy" hidden></div>
+      <p class="msg" id="batches-msg" role="status" hidden></p>
       <p class="quiet" id="batches-none">No batches staged.</p>
       <ol class="blist" id="blist"></ol>
     </section>
@@ -2214,6 +2218,31 @@ details.checks li { display: grid; grid-template-columns: 4.5em minmax(0, 1fr) a
     v.autoNote.textContent = autoNote(v.auto);
   }
 
+  /* The Claude prompt for staged batches names the host when the server is not this Mac. */
+  function promptWhere() {
+    return LIVE.platform && LIVE.platform !== 'darwin' ? ' on ' + LIVE.host + ' (over ssh)' : '';
+  }
+  function copyPrompt(text, box, msg) {
+    var done = function () {
+      box.hidden = true;
+      flash(msg, 'Prompt copied. Paste it into Claude; Claude asks before it files anything.');
+    };
+    var fail = function () {
+      var input = H('input', { type: 'text', readonly: true, value: text, 'aria-label': 'Claude prompt' });
+      refill(box, H('span', { text: 'The browser blocked the clipboard. Copy the prompt from here:' }), input);
+      box.hidden = false;
+      input.focus();
+      input.select();
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(done, fail);
+    else fail();
+  }
+  /* One prompt for every batch that needs analysis, so a pile of them goes through one review. */
+  function analyzeAllPrompt(dirs) {
+    return 'Use the scan skill to analyze and file the ' + dirs.length + ' staged batches that need analysis, in one review: '
+      + dirs.join(', ') + promptWhere();
+  }
+
   var BATCH_ACTIONS = [
     ['stop', 'Stop', 'act'], ['resume', 'Resume scanning', 'act'], ['file', 'File', 'act primary'],
     ['analyze', 'Copy Claude prompt', 'act'], ['reveal', 'Show in Finder', 'act'], ['discard', 'Discard', 'act']
@@ -2239,21 +2268,7 @@ details.checks li { display: grid; grid-template-columns: 4.5em minmax(0, 1fr) a
 
     v.copyBox = H('div', { class: 'copybox', hidden: true });
     v.btn.analyze.addEventListener('click', function () {
-      var text = 'Use the scan skill to analyze and file the staged batch at ' + (v.dir || v.id)
-        + (LIVE.platform && LIVE.platform !== 'darwin' ? ' on ' + LIVE.host + ' (over ssh)' : '');
-      var done = function () {
-        v.copyBox.hidden = true;
-        flash(v.msg, 'Prompt copied. Paste it into Claude; Claude asks before it files anything.');
-      };
-      var fail = function () {
-        var input = H('input', { type: 'text', readonly: true, value: text, 'aria-label': 'Claude prompt' });
-        refill(v.copyBox, H('span', { text: 'The browser blocked the clipboard. Copy the prompt from here:' }), input);
-        v.copyBox.hidden = false;
-        input.focus();
-        input.select();
-      };
-      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(done, fail);
-      else fail();
+      copyPrompt('Use the scan skill to analyze and file the staged batch at ' + (v.dir || v.id) + promptWhere(), v.copyBox, v.msg);
     });
 
     v.confirmBtn = H('button', { class: 'act danger', type: 'button', text: 'Move to Trash' });
@@ -2426,6 +2441,14 @@ details.checks li { display: grid; grid-template-columns: 4.5em minmax(0, 1fr) a
     syncList(blist, live.views.batches, batches, function (b) { return b.id; }, createBatch, updateBatch);
     $('batches-none').hidden = batches.length > 0;
     $('batches-count').textContent = batches.length ? plural(batches.length, 'batch', 'batches') : '';
+    var staged = batches.filter(function (b) { return b.state === 'staged' && allowed(b, 'analyze'); });
+    live.stagedDirs = staged.map(function (b) { return b.dir || b.id; });
+    var allBtn = $('batches-analyze');
+    allBtn.hidden = staged.length < 2;
+    allBtn.textContent = 'Copy Claude prompt for all ' + staged.length;
+    allBtn.setAttribute('aria-label', 'Copy one Claude prompt for the ' + staged.length + ' batches that need analysis');
+    allBtn.disabled = live.frozen;
+    if (allBtn.hidden) $('batches-copy').hidden = true;
 
     var jobs = arr(st.jobs).filter(function (j) { return isObj(j) && j.id; }).sort(function (a, b) {
       if ((a.state === 'running') !== (b.state === 'running')) return a.state === 'running' ? -1 : 1;
@@ -2488,6 +2511,9 @@ details.checks li { display: grid; grid-template-columns: 4.5em minmax(0, 1fr) a
     });
     $('desk-reveal').addEventListener('click', function () {
       post('revealRoot', $('desk-reveal'), $('desk-err'), '/reveal', { target: 'root' });
+    });
+    $('batches-analyze').addEventListener('click', function () {
+      copyPrompt(analyzeAllPrompt(live.stagedDirs || []), $('batches-copy'), $('batches-msg'));
     });
     document.addEventListener('visibilitychange', function () { if (!document.hidden) poll(); });
     setInterval(tick, 1000);
